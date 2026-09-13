@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jarvis — Face to Face</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <canvas id="particles"></canvas>
+  <div class="scanlines" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <div class="app">
+    <!-- Top bar -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark"><span class="brand-mark-inner"></span></div>
+        <div class="brand-text">
+          <p class="brand-eyebrow">HERMES AGENT · NEURAL LINK</p>
+          <h1>JARVIS <span>LIVE</span></h1>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="clock" id="clock">--:--:--</div>
+        <div class="status-pill" id="connStatus">
+          <span class="pulse-dot"></span>
+          <span>CONNECTING</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main grid -->
+    <main class="grid">
+      <!-- Left: video panel -->
+      <section class="panel video-panel">
+        <div class="panel-label"><span>01</span> LIVE FEED</div>
+        <div class="video-wrap">
+          <video id="localVideo" autoplay muted playsinline></video>
+          <canvas id="captureCanvas" hidden></canvas>
+          <div class="video-overlay">
+            <div class="corner tl"></div><div class="corner tr"></div>
+            <div class="corner bl"></div><div class="corner br"></div>
+            <div class="video-hud-top">
+              <span id="camState" class="hud-chip off">CAM OFF</span>
+              <span id="micState" class="hud-chip off">MIC OFF</span>
+            </div>
+            <div class="scan-bar" aria-hidden="true"></div>
+          </div>
+          <div class="video-placeholder" id="videoPlaceholder">
+            <div class="ring-loader"></div>
+            <p>กดเปิดกล้องเพื่อเริ่มการสนทนา</p>
+          </div>
+        </div>
+        <div class="video-controls">
+          <button id="toggleCam" class="ctrl-btn" type="button" title="เปิด/ปิดกล้อง">
+            <svg viewBox="0 0 24 24"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4Z"/></svg>
+            <span>CAMERA</span>
+          </button>
+          <button id="toggleMic" class="ctrl-btn" type="button" title="เปิด/ปิดไมค์">
+            <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+            <span>MIC</span>
+          </button>
+          <button id="askVision" class="ctrl-btn accent" type="button" title="ให้ Jarvis ดูภาพตอนนี้">
+            <svg viewBox="0 0 24 24"><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7Zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10Zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg>
+            <span>ให้ดูภาพ</span>
+          </button>
+          <button id="pushToTalk" class="ctrl-btn talk" type="button" title="กดค้างเพื่อพูด">
+            <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+            <span>กดค้างเพื่อพูด</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Center: Jarvis core -->
+      <section class="core-stage">
+        <div class="core-telemetry top">
+          <span>NEURAL SYNC</span><strong id="syncPct">100%</strong>
+        </div>
+        <div class="core-wrap">
+          <div class="ring ring-outer"></div>
+          <div class="ring ring-mid"></div>
+          <div class="ring ring-inner"></div>
+          <svg class="wave-ring" viewBox="0 0 200 200">
+            <circle id="waveCircle" cx="100" cy="100" r="86" />
+          </svg>
+          <div class="core-orb">
+            <div class="core-orb-inner">
+              <span class="core-glyph">J</span>
+            </div>
+            <div class="core-shine"></div>
+          </div>
+          <div class="particle-dot p1"></div>
+          <div class="particle-dot p2"></div>
+          <div class="particle-dot p3"></div>
+          <div class="particle-dot p4"></div>
+        </div>
+        <div class="core-caption">
+          <span>ASSISTANT STATE</span>
+          <strong id="coreState">STANDBY</strong>
+        </div>
+        <div class="waveform" id="waveform">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="core-telemetry bottom">
+          <span>MODEL</span><strong id="modelName">hermes-agent</strong>
+        </div>
+      </section>
+
+      <!-- Right: conversation -->
+      <section class="panel chat-panel">
+        <div class="panel-label"><span>02</span> CONVERSATION</div>
+        <div id="chatLog" class="chat-log"></div>
+        <form id="chatForm" class="chat-input-row">
+          <input id="chatInput" type="text" placeholder="พิมพ์ข้อความ หรือใช้เสียง..." autocomplete="off">
+          <button type="submit" class="send-btn" aria-label="ส่ง">
+            <svg viewBox="0 0 24 24"><path d="M3 20l18-8L3 4v6l12 2-12 2z"/></svg>
+          </button>
+        </form>
+      </section>
+    </main>
+
+    <footer class="footer-strip">
+      <span>JARVIS WEB · POWERED BY HERMES AGENT API SERVER</span>
+      <span id="latency">LATENCY --ms</span>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
