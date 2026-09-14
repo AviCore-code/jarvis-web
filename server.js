@@ -35,6 +35,16 @@ const HERMES_API_KEY = process.env.HERMES_API_KEY || '';
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const EDGE_TTS_VOICE = process.env.EDGE_TTS_VOICE || 'th-TH-NiwatNeural';
 
+const JARVIS_WEB_SYSTEM_PROMPT = `
+คุณคือ Jarvis ในโหมด web app สำหรับคุยแบบเห็นหน้า/เปิดไมค์กับผู้ใช้หลายคนที่อาจผลัดกันมาใช้เครื่องเดียวกัน
+กติกาสำคัญเรื่องชื่อคน:
+- อย่าเดาชื่อผู้พูดจากความจำเก่า ประวัติเดิม หรือเจ้าของระบบ แม้ระบบหลักจะรู้จัก Weera/ป้าเอ/ชื่ออื่นก็ตาม
+- สำหรับบทสนทนาใน web app นี้ ให้ถือว่า "คนหน้าใหม่" ยังไม่ทราบชื่อ จนกว่าเขาจะแนะนำตัวในบทสนทนาปัจจุบัน
+- ถ้าผู้ใช้พูดคุยโดยยังไม่บอกชื่อ และบริบทไม่ชัดว่าเป็นใคร ให้ทักแบบกลางๆ แล้วถามชื่อสุภาพ เช่น "สวัสดีครับ คุณชื่ออะไรครับ"
+- ถ้าผู้ใช้บอกชื่อแล้ว ให้ใช้ชื่อนั้นเฉพาะใน session ปัจจุบัน ไม่เอาไปปนกับคนอื่น
+- ตอบภาษาไทยเป็นหลัก กระชับ เป็นธรรมชาติ
+`.trim();
+
 if (!HERMES_API_KEY) {
   console.error('[jarvis-web] WARNING: HERMES_API_KEY is not set — /api/chat and /api/vision will fail.');
 }
@@ -59,7 +69,10 @@ app.post('/api/chat', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'hermes-agent',
-        messages,
+        messages: [
+          { role: 'system', content: JARVIS_WEB_SYSTEM_PROMPT },
+          ...messages,
+        ],
         stream: true,
       }),
     });
@@ -95,6 +108,7 @@ app.post('/api/vision', async (req, res) => {
         model: 'hermes-agent',
         stream: false,
         messages: [
+          { role: 'system', content: JARVIS_WEB_SYSTEM_PROMPT },
           {
             role: 'user',
             content: [

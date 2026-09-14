@@ -1,0 +1,70 @@
+/* Voice Sensor + EQ input visualizer */
+.voice-sensor {
+  width: min(280px, 88vw);
+  border: 1px solid rgba(78,225,255,0.22);
+  background: rgba(78,225,255,0.045);
+  border-radius: 12px;
+  padding: 9px 10px 10px;
+  box-shadow: inset 0 0 18px rgba(78,225,255,0.06);
+}
+.sensor-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: 8.5px;
+  letter-spacing: 1.8px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+.sensor-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  box-shadow: 0 0 8px rgba(255,255,255,0.1);
+}
+.voice-sensor.ready .sensor-dot {
+  background: var(--cyan);
+  box-shadow: 0 0 10px var(--cyan);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.voice-sensor.recording .sensor-dot {
+  background: #4dff9e;
+  box-shadow: 0 0 12px #4dff9e;
+}
+.voice-sensor.guarded .sensor-dot {
+  background: var(--amber);
+  box-shadow: 0 0 12px var(--amber);
+}
+.eq-bars {
+  display: grid;
+  grid-template-columns: repeat(16, 1fr);
+  gap: 3px;
+  height: 44px;
+  align-items: end;
+}
+.eq-bars span {
+  height: 8%;
+  min-height: 3px;
+  border-radius: 5px 5px 2px 2px;
+  background: linear-gradient(to top, rgba(78,225,255,0.3), rgba(78,225,255,0.95));
+  box-shadow: 0 0 8px rgba(78,225,255,0.25);
+  transition: height 80ms linear, opacity 120ms ease, background 120ms ease;
+  opacity: 0.35;
+}
+.voice-sensor.recording .eq-bars span {
+  background: linear-gradient(to top, rgba(77,255,158,0.35), rgba(77,255,158,1));
+  box-shadow: 0 0 9px rgba(77,255,158,0.35);
+  opacity: 0.85;
+}
+.voice-sensor.guarded .eq-bars span {
+  background: linear-gradient(to top, rgba(255,179,71,0.25), rgba(255,179,71,0.8));
+  box-shadow: 0 0 8px rgba(255,179,71,0.25);
+  opacity: 0.45;
+}
+@media (max-width: 700px) {
+  .voice-sensor { width: min(260px, 86vw); padding: 8px; }
+  .eq-bars { height: 36px; gap: 2px; }
+  .sensor-head { font-size: 7.5px; letter-spacing: 1.2px; }
+}

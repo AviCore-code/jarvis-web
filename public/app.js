@@ -17,6 +17,23 @@
   let isRecording = false;
   let conversation = []; // {role, content}
   let audioCtx = null;
+  let analyser = null;
+  let analyserData = null;
+  let vadFrame = null;
+  let voiceStartAt = 0;
+  let silenceStartAt = 0;
+  let recordingStartedAt = 0;
+  let jarvisSpeaking = false;
+  let autoListen = true;
+  let textEnabled = false;
+  let pendingListenAfterVision = false;
+  let audioUnlocked = false;
+
+  const VAD_START_THRESHOLD = 0.035;
+  const VAD_STOP_THRESHOLD = 0.018;
+  const VAD_START_HOLD_MS = 120;
+  const VAD_SILENCE_HOLD_MS = 1400;
+  const VAD_MIN_RECORD_MS = 450;
 
   // ---------- DOM ----------
   const $ = (id) => document.getElementById(id);
@@ -37,6 +54,51 @@
   const waveform = $('waveform');
   const clockEl = $('clock');
   const latencyEl = $('latency');
+  const toggleChatPanelBtn = $('toggleChatPanel');
+  const voiceSensor = $('voiceSensor');
+  const sensorLabel = $('sensorLabel');
+  const unlockAudioBtn = $('unlockAudio');
+  const jarvisAudioEl = $('jarvisAudio');
+  const eqBars = Array.from(document.querySelectorAll('#eqBars span'));
+  const cyborgFace = $('cyborgFace');
+  const browLeftEl = $('browLeft');
+  const browRightEl = $('browRight');
+  const mouthBarEls = Array.from(document.querySelectorAll('#mouthBars .mouth-bar'));
+
+  // ---------- Cyborg face: state -> expression, mouth reacts to audio ----------
+  const BROW_SHAPES = {
+    standby:   ['M58 68 L88 74', 'M112 74 L142 68'],
+    listening: ['M58 66 L88 71', 'M112 71 L142 66'],
+    thinking:  ['M58 71 L88 66', 'M112 66 L142 71'],
+    speaking:  ['M58 68 L88 74', 'M112 74 L142 68'],
+    analyzing: ['M58 70 L88 68', 'M112 68 L142 70'],
+    error:     ['M58 74 L88 68', 'M112 68 L142 74'],
+  };
+  function setFaceState(state) {
+    if (!cyborgFace) return;
+    const key = BROW_SHAPES[state] ? state : 'standby';
+    cyborgFace.dataset.state = key;
+    if (browLeftEl && browRightEl) {
+      browLeftEl.setAttribute('d', BROW_SHAPES[key][0]);
+      browRightEl.setAttribute('d', BROW_SHAPES[key][1]);
+    }
+  }
+  let mouthRAF = null;
+  let mouthLevel = 0; // 0..1 target amplitude driving the mouth bars
+  function animateMouth() {
+    const t = performance.now() / 1000;
+    mouthBarEls.forEach((bar, i) => {
+      const wobble = (Math.sin(t * 9 + i * 1.3) + 1) / 2; // 0..1 per-bar jitter
+      const idle = 0.32; // small idle movement even at rest so it never looks frozen
+      const scale = idle + mouthLevel * (0.45 + wobble * 0.75);
+      bar.style.transform = `scaleY(${Math.max(0.12, Math.min(1.15, scale))})`;
+      bar.style.opacity = String(Math.max(0.35, Math.min(1, 0.4 + mouthLevel * 0.8)));
+    });
+    mouthRAF = requestAnimationFrame(animateMouth);
+  }
+  animateMouth();
+  setFaceState('standby');
+
 
   // ---------- Clock ----------
   function tickClock() {
@@ -96,11 +158,57 @@
   }
   function setCoreState(state) {
     coreState.textContent = state;
+    const map = {
+      STANDBY: 'standby', LISTENING: 'listening', TRANSCRIBING: 'thinking',
+      THINKING: 'thinking', SPEAKING: 'speaking', ANALYZING: 'analyzing',
+    };
+    setFaceState(map[state] || 'standby');
   }
   function setConnStatus(state, label) {
     connStatus.className = `status-pill ${state}`;
     connStatus.querySelector('span:last-child').textContent = label;
   }
+
+  function setSensorState(state, label) {
+    if (!voiceSensor || !sensorLabel) return;
+    voiceSensor.className = `voice-sensor ${state || ''}`.trim();
+    sensorLabel.textContent = label;
+  }
+
+  function updateEq(level = 0) {
+    if (!eqBars.length) return;
+    const now = performance.now() / 180;
+    eqBars.forEach((bar, i) => {
+      const wave = (Math.sin(now + i * 0.85) + 1) / 2;
+      const jitter = 0.55 + wave * 0.45;
+      const h = Math.max(6, Math.min(100, (level * 120 * jitter) + (micOn ? 5 : 2)));
+      bar.style.height = `${h}%`;
+      bar.style.opacity = String(Math.max(0.28, Math.min(1, 0.25 + level * 5)));
+    });
+    // While the user is talking (not Jarvis), let the mouth react to mic input
+    // too so the face feels alive even before a reply starts playing back.
+    if (!jarvisSpeaking) mouthLevel = Math.max(0, Math.min(1, level * 6));
+  }
+
+  function setTextEnabled(enabled) {
+    textEnabled = enabled;
+    document.body.classList.toggle('text-disabled', !enabled);
+    if (toggleChatPanelBtn) {
+      toggleChatPanelBtn.textContent = enabled ? 'TEXT ON' : 'TEXT OFF';
+      toggleChatPanelBtn.classList.toggle('off', !enabled);
+      toggleChatPanelBtn.title = enabled
+        ? 'ปิดหน้าต่างข้อความและหยุด audio-to-text'
+        : 'เปิดหน้าต่างข้อความและ audio-to-text';
+    }
+    if (!enabled) {
+      chatInput.value = '';
+      setSensorState(micOn ? 'ready' : '', micOn ? 'VOICE SENSOR READY · TEXT HIDDEN' : 'VOICE SENSOR STANDBY');
+    } else {
+      setSensorState(micOn ? 'ready' : '', micOn ? 'VOICE SENSOR READY' : 'VOICE SENSOR STANDBY');
+    }
+  }
+
+  toggleChatPanelBtn?.addEventListener('click', () => setTextEnabled(!textEnabled));
 
   // health check
   async function checkHealth() {
@@ -109,11 +217,14 @@
       const data = await res.json();
       if (data.ok && data.hermesConfigured) {
         setConnStatus('online', 'JARVIS ONLINE');
+        if (cyborgFace && cyborgFace.dataset.state === 'error') setFaceState('standby');
       } else {
         setConnStatus('error', 'CONFIG MISSING');
+        setFaceState('error');
       }
     } catch {
       setConnStatus('error', 'OFFLINE');
+      setFaceState('error');
     }
   }
   checkHealth();
@@ -172,7 +283,13 @@
       latencyEl.textContent = `LATENCY ${Math.round(performance.now() - t0)}ms`;
       if (data.reply) {
         addMessage('assistant', data.reply);
-        speak(data.reply);
+        pendingListenAfterVision = true;
+        if (!textEnabled) setTextEnabled(true);
+        if (!micOn) {
+          setSensorState('guarded', 'กำลังเปิดไมค์เพื่อรอสนทนาต่อ...');
+          await enableMic({ silent: true });
+        }
+        await speak(data.reply);
       } else {
         addMessage('system', 'เกิดข้อผิดพลาด: ' + (data.error || 'unknown'));
       }
@@ -183,21 +300,33 @@
   });
 
   // ---------- Microphone toggle (enables push-to-talk) ----------
-  async function enableMic() {
+  async function enableMic(options = {}) {
     try {
-      const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // merge into mediaStream if camera already running, else keep separate
+      const audioStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       window.__jarvisAudioStream = audioStream;
+      setupVoiceSensor(audioStream);
       micOn = true;
-      micState.textContent = 'MIC ON';
+      micState.textContent = 'MIC SENSOR ON';
       micState.classList.remove('off'); micState.classList.add('on');
       toggleMicBtn.classList.add('active');
-      addMessage('system', '🎙️ เปิดไมค์แล้ว — กดปุ่ม "กดค้างเพื่อพูด" เพื่อคุย');
+      pushToTalkBtn.querySelector('span').textContent = 'กดค้าง/Auto Listen';
+      setSensorState('ready', pendingListenAfterVision ? 'รอฟังเสียงต่อจากการดูภาพ...' : 'VOICE SENSOR READY');
+      if (!options.silent) addMessage('system', '🎙️ เปิด Voice Sensor แล้ว — พูดได้เลย ระบบจะเริ่มฟังอัตโนมัติ และจะพักไมค์ตอน Jarvis พูด');
+      return true;
     } catch (err) {
-      addMessage('system', 'ไม่สามารถเปิดไมค์ได้: ' + err.message);
+      if (!options.silent) addMessage('system', 'ไม่สามารถเปิดไมค์ได้: ' + err.message);
+      return false;
     }
   }
   function disableMic() {
+    stopVoiceSensor();
+    if (isRecording) stopRecording(true);
     if (window.__jarvisAudioStream) {
       window.__jarvisAudioStream.getTracks().forEach((t) => t.stop());
       window.__jarvisAudioStream = null;
@@ -206,31 +335,112 @@
     micState.textContent = 'MIC OFF';
     micState.classList.remove('on'); micState.classList.add('off');
     toggleMicBtn.classList.remove('active');
+    pushToTalkBtn.querySelector('span').textContent = 'กดค้างเพื่อพูด';
+    setSensorState('', 'VOICE SENSOR STANDBY');
+    updateEq(0);
   }
   toggleMicBtn.addEventListener('click', () => (micOn ? disableMic() : enableMic()));
 
-  // ---------- Push to talk ----------
-  function startRecording() {
-    if (!micOn || !window.__jarvisAudioStream) {
-      addMessage('system', 'กรุณาเปิดไมค์ก่อนครับ');
+  // ---------- Voice sensor + push to talk ----------
+  function setupVoiceSensor(stream) {
+    stopVoiceSensor();
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.68;
+    analyserData = new Uint8Array(analyser.fftSize);
+    source.connect(analyser);
+    voiceStartAt = 0;
+    silenceStartAt = 0;
+    runVoiceSensor();
+  }
+
+  function stopVoiceSensor() {
+    if (vadFrame) cancelAnimationFrame(vadFrame);
+    vadFrame = null;
+    analyser = null;
+    analyserData = null;
+  }
+
+  function runVoiceSensor() {
+    if (!micOn || !analyser || !analyserData) {
+      vadFrame = requestAnimationFrame(runVoiceSensor);
       return;
     }
+
+    analyser.getByteTimeDomainData(analyserData);
+    let sum = 0;
+    for (const v of analyserData) {
+      const x = (v - 128) / 128;
+      sum += x * x;
+    }
+    const rms = Math.sqrt(sum / analyserData.length);
+    updateEq(rms);
+
+    const now = performance.now();
+    const guarded = jarvisSpeaking || coreState.textContent === 'THINKING' || coreState.textContent === 'TRANSCRIBING';
+
+    if (guarded) {
+      if (isRecording) stopRecording(true);
+      setSensorState('guarded', 'OUTPUT GUARD — MIC PAUSED');
+      voiceStartAt = 0;
+      silenceStartAt = 0;
+      vadFrame = requestAnimationFrame(runVoiceSensor);
+      return;
+    }
+
+    if (rms > VAD_START_THRESHOLD) {
+      if (!voiceStartAt) voiceStartAt = now;
+      silenceStartAt = 0;
+      if (!isRecording && autoListen && now - voiceStartAt > VAD_START_HOLD_MS) {
+        startRecording({ auto: true });
+      }
+    } else if (rms < VAD_STOP_THRESHOLD) {
+      voiceStartAt = 0;
+      if (isRecording) {
+        if (!silenceStartAt) silenceStartAt = now;
+        if (now - silenceStartAt > VAD_SILENCE_HOLD_MS && now - recordingStartedAt > VAD_MIN_RECORD_MS) {
+          stopRecording();
+        }
+      }
+    }
+
+    if (!isRecording && !guarded) {
+      const pct = Math.min(99, Math.round(rms * 900));
+      setSensorState('ready', `VOICE SENSOR READY · LEVEL ${pct}%`);
+    }
+    vadFrame = requestAnimationFrame(runVoiceSensor);
+  }
+
+  function startRecording(options = {}) {
+    if (!micOn || !window.__jarvisAudioStream) {
+      if (textEnabled) addMessage('system', 'กรุณาเปิดไมค์ก่อนครับ');
+      return;
+    }
+    if (jarvisSpeaking) return;
+    if (isRecording) return;
     recordedChunks = [];
     mediaRecorder = new MediaRecorder(window.__jarvisAudioStream, { mimeType: 'audio/webm' });
     mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
     mediaRecorder.onstop = handleRecordingStop;
     mediaRecorder.start();
+    recordingStartedAt = performance.now();
     isRecording = true;
     pushToTalkBtn.classList.add('active');
     waveform.classList.add('active');
+    setSensorState('recording', options.auto ? 'VOICE DETECTED — LISTENING' : 'MANUAL LISTENING');
     setCoreState('LISTENING');
   }
-  function stopRecording() {
+  function stopRecording(discard = false) {
     if (mediaRecorder && isRecording) {
+      mediaRecorder.__discard = discard;
       mediaRecorder.stop();
       isRecording = false;
       pushToTalkBtn.classList.remove('active');
       waveform.classList.remove('active');
+      silenceStartAt = 0;
+      voiceStartAt = 0;
     }
   }
   pushToTalkBtn.addEventListener('mousedown', startRecording);
@@ -240,8 +450,13 @@
   pushToTalkBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopRecording(); });
 
   async function handleRecordingStop() {
+    const discard = mediaRecorder?.__discard;
     const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-    if (blob.size < 1000) return; // too short, ignore
+    if (discard || blob.size < 1000) {
+      setCoreState('STANDBY');
+      setSensorState(micOn ? 'ready' : '', micOn ? 'VOICE SENSOR READY' : 'VOICE SENSOR STANDBY');
+      return;
+    }
     setCoreState('TRANSCRIBING');
     const form = new FormData();
     form.append('audio', blob, 'audio.webm');
@@ -261,22 +476,118 @@
   }
 
   // ---------- Text-to-speech playback ----------
+  let ttsAnalyser = null;
+  let ttsData = null;
+  let ttsRAF = null;
+  function setupTtsAnalyser() {
+    if (ttsAnalyser) return; // only wire the <audio> element into WebAudio once
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const src = audioCtx.createMediaElementSource(jarvisAudioEl);
+      ttsAnalyser = audioCtx.createAnalyser();
+      ttsAnalyser.fftSize = 512;
+      ttsAnalyser.smoothingTimeConstant = 0.6;
+      ttsData = new Uint8Array(ttsAnalyser.fftSize);
+      src.connect(ttsAnalyser);
+      ttsAnalyser.connect(audioCtx.destination); // keep audio audible
+    } catch { /* MediaElementSource can only be created once per element; ignore if already wired */ }
+  }
+  function runTtsLipSync() {
+    if (!ttsAnalyser || !ttsData) { mouthLevel = 0; return; }
+    ttsAnalyser.getByteTimeDomainData(ttsData);
+    let sum = 0;
+    for (const v of ttsData) { const x = (v - 128) / 128; sum += x * x; }
+    const rms = Math.sqrt(sum / ttsData.length);
+    mouthLevel = Math.max(0, Math.min(1, rms * 5.5));
+    if (jarvisSpeaking) ttsRAF = requestAnimationFrame(runTtsLipSync);
+    else mouthLevel = 0;
+  }
+  function setUnlockState(unlocked) {
+    audioUnlocked = unlocked;
+    if (!unlockAudioBtn) return;
+    unlockAudioBtn.classList.toggle('active', unlocked);
+    unlockAudioBtn.querySelector('span').textContent = unlocked ? 'SPEAKER ON' : 'SPEAKER';
+    unlockAudioBtn.title = unlocked ? 'เสียงเปิดใช้งานแล้ว — กดอีกครั้งเพื่อทดสอบ' : 'กดเพื่อเปิดเสียง Jarvis (เบราว์เซอร์ต้องการการกดก่อนเล่นเสียงได้)';
+  }
+  async function unlockAudioContext(playTest) {
+    try {
+      if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
+      // Play + immediately pause a silent tick on the shared <audio> element so the
+      // browser marks this origin as "has user gesture for audio" going forward.
+      jarvisAudioEl.muted = false;
+      jarvisAudioEl.src = jarvisAudioEl.src || '';
+      await jarvisAudioEl.play().catch(() => {});
+      jarvisAudioEl.pause();
+      setUnlockState(true);
+      if (playTest) {
+        setSensorState('guarded', 'กำลังทดสอบเสียง Jarvis...');
+        if (textEnabled) addMessage('system', '🔊 ทดสอบเสียง Jarvis...');
+        await speak('สวัสดีครับ ผมจาร์วิส ทดสอบเสียงเรียบร้อยครับ ได้ยินผมไหมครับ');
+      }
+    } catch (err) {
+      setSensorState('', 'เปิดเสียงไม่สำเร็จ — กดปุ่ม SPEAKER อีกครั้ง');
+      if (textEnabled) addMessage('system', 'เปิดเสียงไม่สำเร็จ: ' + err.message + ' — ลองกดปุ่ม SPEAKER อีกครั้งครับ');
+    }
+  }
+  unlockAudioBtn?.addEventListener('click', () => unlockAudioContext(true));
+
   async function speak(text) {
     try {
+      jarvisSpeaking = true;
+      if (isRecording) stopRecording(true);
+      setSensorState('guarded', 'OUTPUT GUARD — MIC PAUSED');
       const res = await fetch('/api/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (textEnabled) addMessage('system', 'สร้างเสียงไม่สำเร็จ (HTTP ' + res.status + ')');
+        throw new Error('speak http ' + res.status);
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
       setCoreState('SPEAKING');
       waveform.classList.add('active');
-      audio.onended = () => { setCoreState('STANDBY'); waveform.classList.remove('active'); URL.revokeObjectURL(url); };
-      audio.play();
-    } catch { /* non-fatal */ }
+      const releaseGuard = () => {
+        jarvisSpeaking = false;
+        setCoreState('STANDBY');
+        waveform.classList.remove('active');
+        if (pendingListenAfterVision && micOn) {
+          pendingListenAfterVision = false;
+          setSensorState('ready', 'ดูภาพแล้ว — พูดต่อได้เลย ผมกำลังฟัง');
+        } else {
+          setSensorState(micOn ? 'ready' : '', micOn ? 'VOICE SENSOR READY' : 'VOICE SENSOR STANDBY');
+        }
+        URL.revokeObjectURL(url);
+      };
+      jarvisAudioEl.onended = releaseGuard;
+      jarvisAudioEl.onerror = releaseGuard;
+      jarvisAudioEl.src = url;
+      jarvisAudioEl.muted = false;
+      jarvisAudioEl.volume = 1;
+      setupTtsAnalyser();
+      try {
+        await jarvisAudioEl.play();
+        setUnlockState(true);
+        if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
+        runTtsLipSync();
+      } catch (playErr) {
+        // Autoplay blocked — most common cause of "Jarvis พูดแต่ไม่ได้ยิน".
+        setUnlockState(false);
+        if (textEnabled) addMessage('system', '🔇 เบราว์เซอร์บล็อกไม่ให้เล่นเสียงอัตโนมัติ — กดปุ่ม SPEAKER ที่แถบกล้อง 1 ครั้งเพื่อปลดล็อกเสียงครับ');
+        else setSensorState('', 'กดปุ่ม SPEAKER ที่แถบกล้องเพื่อเปิดเสียง');
+        releaseGuard();
+      }
+    } catch {
+      jarvisSpeaking = false;
+      if (pendingListenAfterVision && micOn) {
+        pendingListenAfterVision = false;
+        setSensorState('ready', 'ดูภาพแล้ว — พูดต่อได้เลย ผมกำลังฟัง');
+      } else {
+        setSensorState(micOn ? 'ready' : '', micOn ? 'VOICE SENSOR READY' : 'VOICE SENSOR STANDBY');
+      }
+    }
   }
 
   // ---------- Chat (streamed) ----------
@@ -348,6 +659,23 @@
     setCoreState('STANDBY');
   }
 
+  async function autoStartVoiceSensorOnLoad() {
+    if (micOn) return;
+    setSensorState('guarded', 'กำลังขอสิทธิ์ไมค์เพื่อเริ่มฟังอัตโนมัติ...');
+    const ok = await enableMic({ silent: true });
+    if (ok) {
+      setSensorState('ready', 'AUTO LISTENING · TEXT OFF — พูดได้เลย');
+    } else {
+      setSensorState('', 'MIC PERMISSION NEEDED');
+    }
+  }
+
   // ---------- Welcome ----------
-  addMessage('system', 'ระบบพร้อมใช้งาน — พิมพ์ข้อความ หรือเปิดกล้อง/ไมค์เพื่อเริ่มคุยกับ Jarvis');
+  setSensorState('', 'VOICE SENSOR STANDBY');
+  updateEq(0);
+  setTextEnabled(false);
+  setTimeout(autoStartVoiceSensorOnLoad, 600);
+  setTimeout(() => {
+    if (!audioUnlocked) addMessage('system', '🔈 ถ้ากด Jarvis พูดแล้วไม่ได้ยิน ให้กดปุ่ม SPEAKER ที่แถบกล้อง 1 ครั้งก่อนครับ (เบราว์เซอร์กันเล่นเสียงอัตโนมัติ)');
+  }, 1200);
 })();

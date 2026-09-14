@@ -1,0 +1,58 @@
+/* Text/chat panel disable mode */
+.mini-toggle {
+  border: 1px solid rgba(78,225,255,0.28);
+  background: rgba(78,225,255,0.07);
+  color: var(--cyan);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 1.6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.mini-toggle:hover {
+  background: rgba(78,225,255,0.16);
+  box-shadow: 0 0 14px rgba(78,225,255,0.22);
+}
+.mini-toggle.off {
+  color: var(--amber);
+  border-color: rgba(255,179,71,0.45);
+  background: rgba(255,179,71,0.10);
+}
+body.text-disabled .chat-panel {
+  display: none !important;
+}
+body.text-disabled .grid {
+  grid-template-columns: 1.35fr 1fr;
+}
+body.text-disabled .video-panel,
+body.text-disabled .core-stage {
+  min-height: 0;
+}
+body.text-disabled .voice-sensor::after {
+  content: 'TEXT DISABLED · STT OFF';
+  display: block;
+  margin-top: 7px;
+  font-family: var(--font-display);
+  font-size: 7.5px;
+  letter-spacing: 1.4px;
+  color: var(--amber);
+  opacity: 0.9;
+}
+@media (max-width: 1100px) {
+  body.text-disabled .grid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "core"
+      "video";
+  }
+}
+@media (max-width: 700px) {
+  .mini-toggle {
+    padding: 5px 8px;
+    font-size: 7.5px;
+    letter-spacing: 1px;
+  }
+  body.text-disabled .video-panel { min-height: 430px; }
+}

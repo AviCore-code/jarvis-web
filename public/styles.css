@@ -251,6 +251,9 @@ html, body {
 .ctrl-btn.accent:hover { background: rgba(255,179,71,0.14); box-shadow: 0 0 16px rgba(255,179,71,0.3); }
 .ctrl-btn.talk { border-color: rgba(167,139,250,0.4); color: var(--violet); }
 .ctrl-btn.talk:hover, .ctrl-btn.talk.active { background: rgba(167,139,250,0.18); box-shadow: 0 0 18px rgba(167,139,250,0.35); }
+.ctrl-btn.sound { border-color: rgba(77,255,158,0.4); color: #4dff9e; }
+.ctrl-btn.sound:hover { background: rgba(77,255,158,0.14); box-shadow: 0 0 16px rgba(77,255,158,0.3); }
+.ctrl-btn.sound.active { background: rgba(77,255,158,0.22); border-color: #4dff9e; box-shadow: 0 0 18px rgba(77,255,158,0.4); }
 .ctrl-btn:active { transform: scale(0.97); }
 
 /* ---------- Core stage ---------- */
@@ -293,31 +296,93 @@ html, body {
 
 .core-orb {
   position: relative;
-  width: 46%; height: 46%;
+  width: 60%; height: 60%;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, rgba(78,225,255,0.55), rgba(10,30,55,0.9) 70%);
-  box-shadow: 0 0 40px var(--cyan-soft), inset 0 0 30px rgba(78,225,255,0.4);
   display: flex; align-items: center; justify-content: center;
   animation: core-breathe 3s ease-in-out infinite;
 }
 @keyframes core-breathe {
-  0%,100% { transform: scale(1); box-shadow: 0 0 40px var(--cyan-soft), inset 0 0 30px rgba(78,225,255,0.4); }
-  50% { transform: scale(1.05); box-shadow: 0 0 60px var(--cyan-soft), inset 0 0 40px rgba(78,225,255,0.6); }
-}
-.core-orb-inner {
-  width: 70%; height: 70%; border-radius: 50%;
-  background: radial-gradient(circle, rgba(255,255,255,0.15), transparent 70%);
-  display: flex; align-items: center; justify-content: center;
-}
-.core-glyph {
-  font-family: var(--font-display); font-size: 34px; font-weight: 800; color: #fff;
-  text-shadow: 0 0 20px var(--cyan);
+  0%,100% { filter: drop-shadow(0 0 22px var(--cyan-soft)); }
+  50% { filter: drop-shadow(0 0 34px var(--cyan-soft)); }
 }
 .core-shine {
-  position: absolute; top: 8%; left: 18%;
-  width: 30%; height: 18%; border-radius: 50%;
-  background: rgba(255,255,255,0.4); filter: blur(6px);
+  position: absolute; top: 10%; left: 24%;
+  width: 22%; height: 12%; border-radius: 50%;
+  background: rgba(255,255,255,0.25); filter: blur(8px);
+  pointer-events: none;
 }
+
+/* ---------- Cyborg face ---------- */
+.cyborg-face { width: 74%; height: 74%; }
+.face-svg { width: 100%; height: 100%; overflow: visible; }
+.face-shell {
+  stroke: rgba(78,225,255,0.45); stroke-width: 1.5;
+  filter: drop-shadow(0 0 16px rgba(78,225,255,0.25));
+}
+.face-seam { stroke: rgba(78,225,255,0.18); stroke-width: 1; fill: none; }
+.temple-light {
+  fill: var(--amber);
+  filter: drop-shadow(0 0 6px var(--amber));
+  animation: temple-blink 2.6s ease-in-out infinite;
+}
+.temple-right { animation-delay: 1.1s; }
+@keyframes temple-blink { 0%,80%,100% { opacity: 0.35; } 90% { opacity: 1; } }
+.cheek-light {
+  fill: var(--cyan);
+  filter: drop-shadow(0 0 5px var(--cyan));
+  opacity: 0.5;
+}
+.face-visor {
+  fill: rgba(6,14,26,0.7);
+  stroke: rgba(78,225,255,0.3); stroke-width: 1;
+}
+.brow {
+  fill: none; stroke: rgba(160,210,255,0.85); stroke-width: 3.5; stroke-linecap: round;
+  transition: d 0.25s ease, transform 0.25s ease;
+  transform-origin: center;
+}
+.eye-glow {
+  fill: rgba(78,225,255,0.18);
+  transition: all 0.2s ease;
+}
+.eye-pupil {
+  fill: var(--cyan);
+  filter: drop-shadow(0 0 8px var(--cyan)) drop-shadow(0 0 16px var(--cyan-soft));
+  transform-origin: center;
+  animation: eye-blink 5.5s ease-in-out infinite;
+}
+.eye-right .eye-pupil { animation-delay: 0.05s; }
+@keyframes eye-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.08); }
+}
+.mouth-bar {
+  fill: var(--cyan);
+  filter: drop-shadow(0 0 6px var(--cyan));
+  transform-origin: center;
+  transition: transform 0.09s ease, opacity 0.09s ease, fill 0.2s ease;
+  opacity: 0.85;
+}
+
+/* ---- Expression states (driven by #cyborgFace[data-state]; brow/eye path
+   shapes are set directly via JS attributes for cross-browser support —
+   the CSS `d:` property used for path morphing isn't reliable everywhere) */
+.cyborg-face[data-state="standby"] .mouth-bar { transform: scaleY(0.4); opacity: 0.45; }
+
+.cyborg-face[data-state="listening"] .eye-glow { fill: rgba(78,225,255,0.32); }
+.cyborg-face[data-state="listening"] .mouth-bar { transform: scaleY(0.55); opacity: 0.6; }
+
+.cyborg-face[data-state="thinking"] .eye-pupil { fill: var(--violet); filter: drop-shadow(0 0 8px var(--violet)); animation: eye-scan 1.1s ease-in-out infinite; }
+@keyframes eye-scan { 0%,100% { transform: translateX(-2px); } 50% { transform: translateX(2px); } }
+.cyborg-face[data-state="thinking"] .mouth-bar { transform: scaleY(0.3); opacity: 0.4; }
+
+.cyborg-face[data-state="speaking"] .eye-glow { fill: rgba(78,225,255,0.4); }
+.cyborg-face[data-state="speaking"] .cheek-light { opacity: 1; }
+
+.cyborg-face[data-state="analyzing"] .eye-pupil { fill: var(--amber); filter: drop-shadow(0 0 8px var(--amber)); }
+
+.cyborg-face[data-state="error"] .eye-pupil { fill: var(--danger); filter: drop-shadow(0 0 8px var(--danger)); }
+.cyborg-face[data-state="error"] .mouth-bar { transform: scaleY(0.2); opacity: 0.5; }
 
 .particle-dot {
   position: absolute; width: 5px; height: 5px; border-radius: 50%;
@@ -433,4 +498,144 @@ html, body {
   .brand-text h1 { font-size: 16px; }
   .video-controls { flex-direction: column; }
   .ctrl-btn { min-width: 0; }
+}
+
+
+/* ============================================================
+   Mobile + Tablet polish (iPhone/iPad)
+   - Avoid 100vh browser chrome issues with dynamic viewport units
+   - Put Jarvis core first, video second, chat third on small screens
+   - Make controls large enough for touch
+   ============================================================ */
+@supports (height: 100dvh) {
+  html, body { height: 100dvh; }
+  .app { height: 100dvh; }
+}
+
+@media (max-width: 1100px) {
+  html, body {
+    overflow: auto;
+  }
+  .app {
+    min-height: 100vh;
+    height: auto;
+    overflow: visible;
+  }
+  .grid {
+    min-height: auto;
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "core"
+      "video"
+      "chat";
+  }
+  .core-stage { grid-area: core; min-height: 320px; }
+  .video-panel { grid-area: video; min-height: 430px; }
+  .chat-panel { grid-area: chat; min-height: 520px; }
+  .video-wrap { min-height: 300px; }
+  .core-wrap { width: min(300px, 62vw); height: min(300px, 62vw); }
+}
+
+@media (min-width: 701px) and (max-width: 1100px) {
+  .app { padding: 18px; }
+  .topbar { position: sticky; top: 0; z-index: 20; background: rgba(3,7,17,0.82); backdrop-filter: blur(14px); }
+  .video-controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .ctrl-btn { min-height: 48px; min-width: 0; }
+}
+
+@media (max-width: 700px) {
+  html, body {
+    overflow-x: hidden;
+  }
+  .app {
+    padding: 10px;
+    gap: 10px;
+  }
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    padding: 8px 2px 10px;
+    background: rgba(3,7,17,0.88);
+    backdrop-filter: blur(14px);
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .brand { gap: 10px; min-width: 0; }
+  .brand-mark { width: 36px; height: 36px; flex: 0 0 auto; }
+  .brand-mark-inner { width: 13px; height: 13px; }
+  .brand-eyebrow { font-size: 8px; letter-spacing: 1.8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+  .brand-text h1 { font-size: 15px; letter-spacing: 2.5px; }
+  .topbar-right { flex-direction: column; align-items: flex-end; gap: 6px; }
+  .clock { font-size: 11px; letter-spacing: 1px; }
+  .status-pill { padding: 5px 9px; font-size: 8px; letter-spacing: 1px; }
+
+  .grid { gap: 10px; }
+  .panel { border-radius: 14px; padding: 10px; }
+  .panel-label { font-size: 9px; letter-spacing: 2px; margin-bottom: 8px; }
+  .panel-label span { width: 18px; height: 18px; line-height: 18px; }
+
+  .core-stage { min-height: 270px; padding: 6px 0; }
+  .core-wrap { width: min(230px, 78vw); height: min(230px, 78vw); }
+  .core-glyph { font-size: 28px; }
+  .core-caption strong { font-size: 12px; }
+  .core-telemetry { font-size: 8px; letter-spacing: 1.4px; }
+
+  .video-panel { min-height: 390px; }
+  .video-wrap { min-height: 245px; aspect-ratio: 4 / 3; flex: 0 0 auto; }
+  .video-hud-top { top: 10px; left: 32px; right: 32px; }
+  .hud-chip { font-size: 8px; padding: 3px 6px; }
+  .video-placeholder { font-size: 12px; padding: 0 18px; text-align: center; }
+
+  .video-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .ctrl-btn {
+    min-width: 0;
+    min-height: 52px;
+    padding: 11px 8px;
+    font-size: 9px;
+    letter-spacing: 1px;
+    touch-action: manipulation;
+  }
+  .ctrl-btn svg { width: 17px; height: 17px; }
+
+  .chat-panel { min-height: 480px; max-height: 68vh; }
+  .chat-log { gap: 8px; }
+  .msg { max-width: 94%; font-size: 14px; padding: 9px 12px; }
+  .chat-input-row {
+    position: sticky;
+    bottom: 0;
+    background: rgba(6,12,28,0.92);
+    padding-top: 8px;
+    backdrop-filter: blur(10px);
+  }
+  #chatInput { min-height: 46px; font-size: 16px; padding: 11px 12px; } /* 16px prevents iOS zoom */
+  .send-btn { width: 46px; min-width: 46px; }
+  .footer-strip { font-size: 7.5px; letter-spacing: 1px; gap: 8px; flex-wrap: wrap; }
+}
+
+@media (max-width: 390px) {
+  .brand-eyebrow { max-width: 145px; }
+  .brand-text h1 { font-size: 13px; letter-spacing: 2px; }
+  .status-pill { font-size: 7.5px; padding: 5px 7px; }
+  .core-wrap { width: min(210px, 82vw); height: min(210px, 82vw); }
+  .video-wrap { min-height: 220px; }
+  .ctrl-btn span { display: inline; }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .app { height: auto; min-height: 100dvh; }
+  .grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "core chat"
+      "video chat";
+  }
+  .core-stage { min-height: 220px; }
+  .core-wrap { width: 180px; height: 180px; }
+  .video-panel { min-height: 280px; }
+  .chat-panel { min-height: 520px; }
 }
