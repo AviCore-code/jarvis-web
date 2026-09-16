@@ -231,6 +231,23 @@
   setInterval(checkHealth, 20000);
 
   // ---------- Camera ----------
+  // camPrefStore remembers the user's *explicit* camera preference so the
+  // next manual press of the toggle can act on it. We never auto-open the
+  // camera on first paint — preference is consulted only on user gesture.
+  const camPrefStore = (() => {
+    const KEY = 'jarvisWeb.camera.preference';
+    const ls = (typeof window !== 'undefined' && window.localStorage) || null;
+    return {
+      load() {
+        if (!ls) return false;
+        try { return ls.getItem(KEY) === 'on'; } catch (_) { return false; }
+      },
+      save(wantsOn) {
+        if (!ls) return;
+        try { ls.setItem(KEY, wantsOn ? 'on' : 'off'); } catch (_) { /* quota / disabled — ignore */ }
+      },
+    };
+  })();
   async function enableCamera() {
     try {
       mediaStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
@@ -240,6 +257,7 @@
       camState.textContent = 'CAM ON';
       camState.classList.remove('off'); camState.classList.add('on');
       toggleCamBtn.classList.add('active');
+      camPrefStore.save(true); // user explicitly enabled — remember for next page
       addMessage('system', '📷 เปิดกล้องแล้ว — Jarvis จะไม่เห็นภาพจนกว่าคุณจะกด "ให้ดูภาพ"');
     } catch (err) {
       addMessage('system', 'ไม่สามารถเปิดกล้องได้: ' + err.message);
@@ -256,7 +274,46 @@
     camState.classList.remove('on'); camState.classList.add('off');
     toggleCamBtn.classList.remove('active');
   }
-  toggleCamBtn.addEventListener('click', () => (camOn ? disableCamera() : enableCamera()));
+  // camAutoRelease + mirror guard: after a /api/vision snapshot settles
+  // (reply OR error), we stop the camera tracks, null srcObject, flip the
+  // chips, and remove the active class. While we're releasing the
+  // camera — the small synchronous window inside this function — we set a
+  // `dataset.autoReleasing` flag on the toggle button. A user click that
+  // arrives during that window is *queued* (their intent — "on" or "off"
+  // relative to the state at the moment they pressed) and drained after a
+  // microtask; the flag is also cleared then. The user's prior manual
+  // preference still survives across reload via camPrefStore.
+  let camAutoReleasing = false;
+  let pendingCamIntent = null; // 'on' | 'off' | null
+  function camAutoRelease(reason) {
+    if (!camOn || camAutoReleasing) return;
+    camAutoReleasing = true;
+    try { toggleCamBtn.dataset.autoReleasing = reason || 'true'; } catch (_) { /* ignore */ }
+    try {
+      disableCamera();
+    } finally {
+      const finish = () => {
+        try { delete toggleCamBtn.dataset.autoReleasing; } catch (_) { /* ignore */ }
+        camAutoReleasing = false;
+        const intent = pendingCamIntent;
+        pendingCamIntent = null;
+        if (intent === 'on' && !camOn) enableCamera();
+        else if (intent === 'off' && camOn) disableCamera();
+      };
+      if (typeof queueMicrotask === 'function') queueMicrotask(finish);
+      else Promise.resolve().then(finish);
+    }
+  }
+  toggleCamBtn.addEventListener('click', () => {
+    if (camAutoReleasing) {
+      // Queue the user's intent — opposite of the current state — rather
+      // than racing our auto-release.
+      pendingCamIntent = camOn ? 'off' : 'on';
+      return;
+    }
+    if (camOn) { disableCamera(); camPrefStore.save(false); }
+    else enableCamera();
+  });
 
   // ---------- Vision snapshot (on-demand only — cost-controlled) ----------
   askVisionBtn.addEventListener('click', async () => {
@@ -290,11 +347,14 @@
           await enableMic({ silent: true });
         }
         await speak(data.reply);
+        camAutoRelease('reply'); // /api/vision settled -> snap cameras off
       } else {
         addMessage('system', 'เกิดข้อผิดพลาด: ' + (data.error || 'unknown'));
+        camAutoRelease('error');
       }
     } catch (err) {
       addMessage('system', 'เชื่อมต่อไม่สำเร็จ: ' + err.message);
+      camAutoRelease('error');
     }
     setCoreState('STANDBY');
   });

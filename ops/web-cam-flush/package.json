@@ -1,0 +1,9 @@
+{
+  "name": "jarvis-web-web-cam-flush",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Tests for camera auto-release after vision snapshots in jarvis-web/public/app.js",
+  "scripts": {
+    "test": "node --test test_*.js"
+  }
+}
