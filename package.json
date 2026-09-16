@@ -1,6 +1,6 @@
 {
   "name": "jarvis-web",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Jarvis face-to-face voice+video web app, backed by Hermes Agent API Server",
   "main": "server.js",
   "type": "commonjs",
