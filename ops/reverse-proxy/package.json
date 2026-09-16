@@ -1,0 +1,16 @@
+{
+  "name": "proxy",
+  "version": "1.1.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test proxy.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "http-proxy": "^1.18.1"
+  }
+}
