@@ -1,12 +1,12 @@
 {
   "name": "jarvis-web",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Jarvis face-to-face voice+video web app, backed by Hermes Agent API Server",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test ops/reverse-proxy/proxy.test.js && python3 -m unittest discover -s ops/location-tracker -p 'test_*.py'"
+    "test": "node --test ops/reverse-proxy/proxy.test.js && python3 -m unittest discover -s ops/location-tracker -p 'test_*.py' && python3 ops/tailscale/test_watchdog.py"
   },
   "dependencies": {
     "express": "^4.19.2",
