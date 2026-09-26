@@ -151,7 +151,7 @@ class WatchdogPidSelectionTest(unittest.TestCase):
             self.assertFalse(launch_log.exists(), result.stdout + result.stderr)
             self.assertIn("did not terminate", result.stderr)
 
-    def test_restart_health_checks_use_ten_second_monotonic_deadline(self):
+    def test_restart_health_checks_use_at_least_forty_second_monotonic_deadline(self):
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
             app = root / "mission"
@@ -173,7 +173,7 @@ class WatchdogPidSelectionTest(unittest.TestCase):
                 "#!/bin/sh\n"
                 f"state={shlex.quote(str(now_state))}; log={shlex.quote(str(now_log))}\n"
                 "n=0; [ ! -f \"$state\" ] || n=$(cat \"$state\")\n"
-                "case $n in 0|1) value=0;; 2) value=4;; 3) value=8;; *) value=10;; esac\n"
+                "case $n in 0|1) value=0;; 2) value=15;; 3) value=30;; *) value=45;; esac\n"
                 "printf '%s\\n' $((n + 1)) > \"$state\"\n"
                 "printf '%s\\n' \"$value\" >> \"$log\"\n"
                 "printf '%s\\n' \"$value\"\n",
@@ -196,6 +196,7 @@ class WatchdogPidSelectionTest(unittest.TestCase):
                 f"mkdir {shlex.quote(str(proc_root))}/\"$pid\"\n"
                 f"ln -s {shlex.quote(str(node))} {shlex.quote(str(proc_root))}/\"$pid\"/exe\n"
                 f"ln -s {shlex.quote(str(app))} {shlex.quote(str(proc_root))}/\"$pid\"/cwd\n"
+                f"printf '%s' \"$pid (node) S 1 $pid $pid 0 -1 4194304 100 0 0 0 1 2 3 4 5 6 7 8 9 42424242\\n\" > {shlex.quote(str(proc_root))}/\"$pid\"/stat\n"
                 "exec /bin/sleep 2\n",
             )
 
@@ -223,7 +224,8 @@ class WatchdogPidSelectionTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertTrue(now_log.exists(), "NOW_CMD was not used")
             times = [int(value) for value in now_log.read_text().splitlines()]
-            self.assertLessEqual(max(times) - times[0], 10)
+            self.assertGreaterEqual(max(times) - times[0], 40)
+            self.assertLessEqual(max(times) - times[0], 45)
             # Round-2 expansion: the watchdog may legitimately take several
             # sleep samples across the early-wait and the deadline loop
             # (identity re-check, curl retry, port-owner re-check); the
@@ -319,6 +321,11 @@ class WatchdogPidSelectionTest(unittest.TestCase):
                 f"mkdir {shlex.quote(str(proc_root))}/\"$pid\"\n"
                 f"ln -s {shlex.quote(str(node))} {shlex.quote(str(proc_root))}/\"$pid\"/exe\n"
                 f"ln -s {shlex.quote(str(app))} {shlex.quote(str(proc_root))}/\"$pid\"/cwd\n"
+                f"printf '%s' \"$pid (node) S 1 $pid $pid 0 -1 4194304 100 0 0 0 1 2 3 4 5 6 7 8 9 42424242\\n\" > {shlex.quote(str(proc_root))}/\"$pid\"/stat\n"
+                f"mkdir {shlex.quote(str(proc_root))}/\"$pid\"/fd\n"
+                f"ln -s 'socket:[31415]' {shlex.quote(str(proc_root))}/\"$pid\"/fd/3\n"
+                f"mkdir -p {shlex.quote(str(proc_root))}/net\n"
+                f"printf '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\\n   0: 00000000:BC3 00000000:0000 0A 00000000:00000000 00:00000000 00000000 10000        0 31415\\n' > {shlex.quote(str(proc_root))}/net/tcp\n"
                 "exec /bin/sleep 2\n",
             )
 
@@ -582,7 +589,14 @@ class WatchdogPidSelectionTest(unittest.TestCase):
             # A different process owns port 3010 via inode 7777.
             (proc_root / "net").mkdir()
 
-            write_executable(bin_dir / "curl", "#!/bin/sh\nexit 0\n")  # always healthy
+            curl_state = root / "curl-state"
+            write_executable(
+                bin_dir / "curl",
+                "#!/bin/sh\n"
+                f"state={shlex.quote(str(curl_state))}\n"
+                "if [ ! -f \"$state\" ]; then touch \"$state\"; exit 1; fi\n"
+                "exit 0\n",
+            )
             write_executable(bin_dir / "sleep", "#!/bin/sh\nexit 0\n")
             write_executable(
                 bin_dir / "setsid",
@@ -657,8 +671,8 @@ class WatchdogPidSelectionTest(unittest.TestCase):
                 "#!/bin/sh\n"
                 f"state={shlex.quote(str(now_state))}\n"
                 "n=0; [ -f \"$state\" ] && n=$(cat \"$state\")\n"
-                "n=$((n + 1)); printf '%s\\n' \"$n\" > \"$state\"\n"
-                "[ \"$n\" -gt 11 ] && n=11\n"
+                "n=$((n + 15)); printf '%s\\n' \"$n\" > \"$state\"\n"
+                "[ \"$n\" -gt 60 ] && n=60\n"
                 "printf '%s\\n' \"$n\"\n",
             )
             write_executable(
@@ -696,6 +710,7 @@ class WatchdogPidSelectionTest(unittest.TestCase):
                     "PROC_ROOT": str(proc_root),
                     "APP_DIR": str(app),
                     "MISSION_LOG": str(root / "mission.log"),
+                    "MISSION_PORT": "3010",
                     "SLEEP_CMD": str(bin_dir / "fake-sleep"),
                     "NOW_CMD": str(bin_dir / "fake-now"),
                 },

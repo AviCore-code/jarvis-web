@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/opt/data/projects/jarvis-mission-control}"
-LOG="${MISSION_LOG:-/opt/data/logs/jarvis-mission-control.log}"
-PORT="${MISSION_PORT:-3010}"
+APP_DIR="${APP_DIR:-/opt/data/projects/avicore-jarvis-core}"
+LOG="${MISSION_LOG:-/opt/data/logs/mission-control.log}"
+PORT="${MISSION_PORT:-3011}"
+ENTRY="${MISSION_ENTRY:-src/mission-control/index.js}"
 PROC_ROOT="${PROC_ROOT:-/proc}"
-HEALTH_URL="http://127.0.0.1:${PORT}/mission/api/health"
+HEALTH_URL="http://127.0.0.1:${PORT}/api/health"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROC_HELPERS="${PROC_HELPERS:-${SCRIPT_DIR}/proc_helpers.py}"
 
@@ -164,7 +165,8 @@ if [ "${#signaled_pids[@]}" -ne 0 ]; then
 fi
 
 cd "${APP_DIR}"
-setsid env MISSION_PORT="${PORT}" MISSION_BASE=/mission nohup node server.js > "${LOG}" 2>&1 < /dev/null &
+mkdir -p "$(dirname "${LOG}")"
+setsid env MISSION_PORT="${PORT}" nohup node "${ENTRY}" > "${LOG}" 2>&1 < /dev/null &
 launched_pid=$!
 disown || true
 
@@ -190,7 +192,7 @@ if [ -z "${launched_start}" ]; then
 fi
 
 start_tick="$(monotonic_seconds)"
-deadline=$((start_tick + 10))
+deadline=$((start_tick + 45))
 while [ "$(monotonic_seconds)" -lt "${deadline}" ]; do
   # First, the process itself must still exist AND still be the same
   # kernel task (start_time unchanged).  No id = no false success.
