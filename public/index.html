@@ -37,51 +37,6 @@
 
     <!-- Main grid -->
     <main class="grid">
-      <!-- Left: video panel -->
-      <section class="panel video-panel">
-        <div class="panel-label"><span>01</span> LIVE FEED</div>
-        <div class="video-wrap">
-          <video id="localVideo" autoplay muted playsinline></video>
-          <canvas id="captureCanvas" hidden></canvas>
-          <div class="video-overlay">
-            <div class="corner tl"></div><div class="corner tr"></div>
-            <div class="corner bl"></div><div class="corner br"></div>
-            <div class="video-hud-top">
-              <span id="camState" class="hud-chip off">CAM OFF</span>
-              <span id="micState" class="hud-chip off">MIC OFF</span>
-            </div>
-            <div class="scan-bar" aria-hidden="true"></div>
-          </div>
-          <div class="video-placeholder" id="videoPlaceholder">
-            <div class="ring-loader"></div>
-            <p>กดเปิดกล้องเพื่อเริ่มการสนทนา</p>
-          </div>
-        </div>
-        <div class="video-controls">
-          <button id="toggleCam" class="ctrl-btn" type="button" title="เปิด/ปิดกล้อง">
-            <svg viewBox="0 0 24 24"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4Z"/></svg>
-            <span>CAMERA</span>
-          </button>
-          <button id="toggleMic" class="ctrl-btn" type="button" title="เปิด/ปิดไมค์">
-            <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
-            <span>MIC</span>
-          </button>
-          <button id="unlockAudio" class="ctrl-btn sound" type="button" title="เปิดเสียง Jarvis / ทดสอบเสียง">
-            <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3Zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.06A4.5 4.5 0 0 0 16.5 12Zm0-8.5v2.06A7.5 7.5 0 0 1 20 12a7.5 7.5 0 0 1-3.5 6.44v2.06A9.5 9.5 0 0 0 22 12a9.5 9.5 0 0 0-5.5-8.5Z"/></svg>
-            <span>SPEAKER</span>
-          </button>
-          <audio id="jarvisAudio" preload="auto" playsinline></audio>
-          <button id="askVision" class="ctrl-btn accent" type="button" title="ให้ Jarvis ดูภาพตอนนี้">
-            <svg viewBox="0 0 24 24"><path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7Zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10Zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg>
-            <span>ให้ดูภาพ</span>
-          </button>
-          <button id="pushToTalk" class="ctrl-btn talk" type="button" title="กดค้างเพื่อพูด">
-            <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
-            <span>กดค้างเพื่อพูด</span>
-          </button>
-        </div>
-      </section>
-
       <!-- Center: Jarvis core -->
       <section class="core-stage">
         <div class="core-telemetry top">
@@ -187,6 +142,582 @@
     </footer>
   </div>
 
+  <!-- Audio element for TTS playback -->
+  <audio id="jarvisAudio" preload="auto" playsinline></audio>
+
   <script src="app.js"></script>
+  <script>
+  (function () {
+    'use strict';
+
+    // ─── State ────────────────────────────────────────────────────────────────
+    var messages = [];              // conversation history (max 20)
+    var currentState = 'standby';  // standby|listening|recording|transcribing|thinking|speaking
+    var conversationMode = null;    // created after app.js loads
+    var micStream = null;
+    var audioCtx = null;
+    var analyser = null;
+    var mediaRecorder = null;
+    var recordingChunks = [];
+    var isRecording = false;
+    var vadRisingTimer = null;
+    var vadFallingTimer = null;
+    var vadActive = false;
+    var audioUnlocked = false;
+    var ttsQueue = [];
+    var ttsPlaying = false;
+    var currentAiBubble = null;
+    var currentAiText = '';
+    var streamingBuffer = '';
+    var sentenceSendTimer = null;
+    var eqBarsEl = null;
+    var sensorLabel = null;
+    var sensorDot = null;
+    var vadInterval = null;
+
+    // ─── DOM refs ──────────────────────────────────────────────────────────────
+    var clockEl = document.getElementById('clock');
+    var connStatusEl = document.getElementById('connStatus');
+    var latencyEl = document.getElementById('latency');
+    var coreStateEl = document.getElementById('coreState');
+    var cyborgFaceEl = document.getElementById('cyborgFace');
+    var chatLogEl = document.getElementById('chatLog');
+    var chatFormEl = document.getElementById('chatForm');
+    var chatInputEl = document.getElementById('chatInput');
+    var toggleChatPanelBtn = document.getElementById('toggleChatPanel');
+    var chatPanelEl = document.querySelector('.chat-panel');
+    var jarvisAudio = document.getElementById('jarvisAudio');
+
+    // ─── Clock ────────────────────────────────────────────────────────────────
+    function updateClock() {
+      var now = new Date();
+      var h = String(now.getHours()).padStart(2, '0');
+      var m = String(now.getMinutes()).padStart(2, '0');
+      var s = String(now.getSeconds()).padStart(2, '0');
+      clockEl.textContent = h + ':' + m + ':' + s;
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // ─── State machine ────────────────────────────────────────────────────────
+    function setState(state) {
+      currentState = state;
+      var label = state.toUpperCase();
+      coreStateEl.textContent = label;
+      cyborgFaceEl.setAttribute('data-state', state);
+
+      var sensorLabelEl = document.getElementById('sensorLabel');
+      if (sensorLabelEl) {
+        if (state === 'listening') sensorLabelEl.textContent = 'LISTENING - รอคำสั่ง...';
+        else if (state === 'recording') sensorLabelEl.textContent = 'RECORDING - บันทึกเสียง...';
+        else if (state === 'transcribing') sensorLabelEl.textContent = 'TRANSCRIBING - ถอดเสียง...';
+        else if (state === 'thinking') sensorLabelEl.textContent = 'THINKING - ประมวลผล...';
+        else if (state === 'speaking') sensorLabelEl.textContent = 'SPEAKING - กำลังพูด...';
+        else sensorLabelEl.textContent = 'VOICE SENSOR STANDBY';
+      }
+    }
+
+    // ─── Health check ─────────────────────────────────────────────────────────
+    function checkHealth() {
+      var t0 = Date.now();
+      fetch('api/health')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          var ms = Date.now() - t0;
+          if (data && data.ok) {
+            var span = connStatusEl.querySelector('span:last-child');
+            if (span) span.textContent = 'ONLINE';
+            connStatusEl.classList.add('online');
+            connStatusEl.classList.remove('offline');
+            var dot = connStatusEl.querySelector('.pulse-dot');
+            if (dot) dot.style.background = '#00ff88';
+          } else {
+            setOffline();
+          }
+          latencyEl.textContent = 'LATENCY ' + ms + 'ms';
+        })
+        .catch(function () { setOffline(); });
+    }
+
+    function setOffline() {
+      var span = connStatusEl.querySelector('span:last-child');
+      if (span) span.textContent = 'OFFLINE';
+      connStatusEl.classList.add('offline');
+      connStatusEl.classList.remove('online');
+      var dot = connStatusEl.querySelector('.pulse-dot');
+      if (dot) dot.style.background = '#ff4444';
+    }
+
+    checkHealth();
+    setInterval(checkHealth, 30000);
+
+    // ─── Chat panel toggle ────────────────────────────────────────────────────
+    toggleChatPanelBtn.addEventListener('click', function () {
+      if (chatPanelEl) {
+        var hidden = chatPanelEl.style.display === 'none';
+        chatPanelEl.style.display = hidden ? '' : 'none';
+        toggleChatPanelBtn.textContent = hidden ? 'TEXT ON' : 'TEXT OFF';
+      }
+    });
+
+    // ─── Chat UI helpers ──────────────────────────────────────────────────────
+    function appendUserBubble(text) {
+      var div = document.createElement('div');
+      div.className = 'msg user';
+      div.textContent = text;
+      chatLogEl.appendChild(div);
+      chatLogEl.scrollTop = chatLogEl.scrollHeight;
+      return div;
+    }
+
+    function appendAiBubble() {
+      var div = document.createElement('div');
+      div.className = 'msg ai';
+      chatLogEl.appendChild(div);
+      chatLogEl.scrollTop = chatLogEl.scrollHeight;
+      return div;
+    }
+
+    function updateAiBubble(bubble, text, streaming) {
+      // Safe text update with optional blinking cursor
+      bubble.textContent = text + (streaming ? '|' : '');
+      chatLogEl.scrollTop = chatLogEl.scrollHeight;
+    }
+
+    // ─── TTS queue ────────────────────────────────────────────────────────────
+    function enqueueTts(text) {
+      if (!text || !text.trim()) return;
+      ttsQueue.push(text.trim());
+      if (!ttsPlaying) playNextTts();
+    }
+
+    function playNextTts() {
+      if (ttsQueue.length === 0) {
+        ttsPlaying = false;
+        if (currentState === 'speaking') setState('standby');
+        return;
+      }
+      ttsPlaying = true;
+      var chunk = ttsQueue.shift();
+      setState('speaking');
+      fetch('api/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: chunk })
+      })
+        .then(function (r) {
+          if (!r.ok) throw new Error('TTS failed');
+          return r.blob();
+        })
+        .then(function (blob) {
+          var url = URL.createObjectURL(blob);
+          jarvisAudio.src = url;
+          return jarvisAudio.play();
+        })
+        .catch(function (e) {
+          console.warn('[jarvis] TTS error:', e);
+          ttsPlaying = false;
+          playNextTts();
+        });
+    }
+
+    jarvisAudio.addEventListener('ended', function () {
+      ttsPlaying = false;
+      playNextTts();
+    });
+
+    jarvisAudio.addEventListener('error', function () {
+      ttsPlaying = false;
+      playNextTts();
+    });
+
+    // ─── Interrupt / barge-in ─────────────────────────────────────────────────
+    function interruptSpeaking() {
+      if (currentState === 'speaking') {
+        jarvisAudio.pause();
+        jarvisAudio.src = '';
+        ttsQueue = [];
+        ttsPlaying = false;
+        setState('listening');
+      }
+    }
+
+    // ─── Sentence detection for early TTS ────────────────────────────────────
+    var sentencePattern = /[.?!\n。？！ๆ]+/;
+
+    function flushSentences(fullText, isFinal) {
+      if (isFinal) {
+        // Send whatever remains
+        var remaining = fullText.trim();
+        if (remaining) enqueueTts(remaining);
+        streamingBuffer = '';
+        return;
+      }
+      // Try to find complete sentences in new text
+      var parts = fullText.split(sentencePattern);
+      if (parts.length > 1) {
+        // There is at least one complete sentence
+        for (var i = 0; i < parts.length - 1; i++) {
+          var sent = parts[i].trim();
+          if (sent) enqueueTts(sent);
+        }
+        // Keep the incomplete last part
+        streamingBuffer = parts[parts.length - 1] || '';
+      } else {
+        streamingBuffer = fullText;
+      }
+    }
+
+    // ─── Chat / SSE streaming ─────────────────────────────────────────────────
+    function submitMessage(text) {
+      if (!text || !text.trim()) return;
+      text = text.trim();
+
+      // Add to history
+      messages.push({ role: 'user', content: text });
+      if (messages.length > 20) messages = messages.slice(messages.length - 20);
+
+      appendUserBubble(text);
+      currentAiBubble = appendAiBubble();
+      currentAiText = '';
+      streamingBuffer = '';
+      setState('thinking');
+
+      fetch('api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: messages.slice() })
+      })
+        .then(function (r) {
+          if (!r.ok) throw new Error('Chat API error ' + r.status);
+          return r.body.getReader();
+        })
+        .then(function (reader) {
+          var decoder = new TextDecoder();
+          var buf = '';
+
+          function pump() {
+            return reader.read().then(function (result) {
+              if (result.done) {
+                // Stream finished
+                updateAiBubble(currentAiBubble, currentAiText, false);
+                flushSentences(streamingBuffer, true);
+                // Add AI response to history
+                if (currentAiText) {
+                  messages.push({ role: 'assistant', content: currentAiText });
+                  if (messages.length > 20) messages = messages.slice(messages.length - 20);
+                }
+                if (currentState === 'thinking') setState('standby');
+                return;
+              }
+
+              buf += decoder.decode(result.value, { stream: true });
+              var lines = buf.split('\n');
+              buf = lines.pop(); // keep partial line
+
+              for (var i = 0; i < lines.length; i++) {
+                var line = lines[i].trim();
+                if (!line || !line.startsWith('data:')) continue;
+                var jsonStr = line.slice(5).trim();
+                if (jsonStr === '[DONE]') {
+                  updateAiBubble(currentAiBubble, currentAiText, false);
+                  flushSentences(streamingBuffer, true);
+                  if (currentAiText) {
+                    messages.push({ role: 'assistant', content: currentAiText });
+                    if (messages.length > 20) messages = messages.slice(messages.length - 20);
+                  }
+                  if (currentState === 'thinking') setState('standby');
+                  return;
+                }
+                try {
+                  var obj = JSON.parse(jsonStr);
+                  var delta = obj.choices &&
+                              obj.choices[0] &&
+                              obj.choices[0].delta &&
+                              obj.choices[0].delta.content;
+                  if (delta) {
+                    currentAiText += delta;
+                    streamingBuffer += delta;
+                    updateAiBubble(currentAiBubble, currentAiText, true);
+                    // Try to flush complete sentences
+                    flushSentences(streamingBuffer, false);
+                  }
+                } catch (e) {
+                  // ignore parse errors on partial chunks
+                }
+              }
+              return pump();
+            });
+          }
+          return pump();
+        })
+        .catch(function (e) {
+          console.error('[jarvis] chat error:', e);
+          if (currentAiBubble) {
+            currentAiBubble.textContent = '[เกิดข้อผิดพลาด: ' + e.message + ']';
+          }
+          setState('standby');
+        });
+    }
+
+    // ─── Form submit ──────────────────────────────────────────────────────────
+    chatFormEl.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var text = chatInputEl.value.trim();
+      if (!text) return;
+      chatInputEl.value = '';
+      submitMessage(text);
+    });
+
+    // ─── Voice / VAD ──────────────────────────────────────────────────────────
+    var VAD_THRESHOLD = 0.015;
+    var VAD_RISE_MS = 300;
+    var VAD_FALL_MS = 1200;
+
+    function setupVad(stream) {
+      try {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        var source = audioCtx.createMediaStreamSource(stream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.4;
+        source.connect(analyser);
+
+        eqBarsEl = document.getElementById('eqBars');
+        sensorLabel = document.getElementById('sensorLabel');
+        sensorDot = document.getElementById('sensorDot');
+
+        var dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+        if (vadInterval) clearInterval(vadInterval);
+        vadInterval = setInterval(function () {
+          analyser.getByteTimeDomainData(dataArray);
+          // Compute RMS
+          var sum = 0;
+          for (var i = 0; i < dataArray.length; i++) {
+            var v = (dataArray[i] / 128.0) - 1.0;
+            sum += v * v;
+          }
+          var rms = Math.sqrt(sum / dataArray.length);
+
+          // Update EQ bars visual
+          if (eqBarsEl) {
+            var bars = eqBarsEl.querySelectorAll('span');
+            analyser.getByteFrequencyData(dataArray);
+            var step = Math.floor(dataArray.length / bars.length);
+            for (var j = 0; j < bars.length; j++) {
+              var val = dataArray[j * step] / 255;
+              bars[j].style.height = Math.max(4, val * 40) + 'px';
+              bars[j].style.opacity = 0.4 + val * 0.6;
+            }
+          }
+
+          // Update level label
+          if (sensorLabel && currentState === 'listening') {
+            var pct = Math.round(Math.min(100, rms * 400));
+            sensorLabel.textContent = 'LISTENING - LEVEL ' + pct + '%';
+          }
+
+          // VAD logic — blocked while thinking/speaking/transcribing
+          var blocked = currentState === 'thinking' ||
+                        currentState === 'speaking' ||
+                        currentState === 'transcribing';
+
+          if (blocked) {
+            // If speaking and user talks loud → barge-in
+            if (currentState === 'speaking' && rms > VAD_THRESHOLD * 2) {
+              interruptSpeaking();
+            }
+            return;
+          }
+
+          if (rms > VAD_THRESHOLD) {
+            // Voice detected
+            if (!vadActive) {
+              if (!vadRisingTimer) {
+                vadRisingTimer = setTimeout(function () {
+                  vadActive = true;
+                  vadRisingTimer = null;
+                  startRecording(stream);
+                }, VAD_RISE_MS);
+              }
+              // Clear any falling timer
+              if (vadFallingTimer) {
+                clearTimeout(vadFallingTimer);
+                vadFallingTimer = null;
+              }
+            } else if (isRecording) {
+              // Still recording, voice active — reset falling timer
+              if (vadFallingTimer) {
+                clearTimeout(vadFallingTimer);
+                vadFallingTimer = null;
+              }
+            }
+          } else {
+            // Silence
+            if (vadRisingTimer) {
+              clearTimeout(vadRisingTimer);
+              vadRisingTimer = null;
+            }
+            if (vadActive && isRecording && !vadFallingTimer) {
+              vadFallingTimer = setTimeout(function () {
+                vadFallingTimer = null;
+                vadActive = false;
+                stopRecording();
+              }, VAD_FALL_MS);
+            }
+          }
+        }, 100);
+
+        setState('listening');
+        console.log('[jarvis] VAD started');
+      } catch (e) {
+        console.warn('[jarvis] VAD setup failed:', e);
+      }
+    }
+
+    function startRecording(stream) {
+      if (isRecording) return;
+      recordingChunks = [];
+      try {
+        var mimeType = 'audio/webm;codecs=opus';
+        if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'audio/webm';
+        if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = '';
+        mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType: mimeType } : {});
+        mediaRecorder.ondataavailable = function (e) {
+          if (e.data && e.data.size > 0) recordingChunks.push(e.data);
+        };
+        mediaRecorder.start(100);
+        isRecording = true;
+        setState('recording');
+      } catch (e) {
+        console.warn('[jarvis] MediaRecorder failed:', e);
+        vadActive = false;
+        isRecording = false;
+      }
+    }
+
+    function stopRecording() {
+      if (!isRecording || !mediaRecorder) return;
+      isRecording = false;
+      mediaRecorder.stop();
+      mediaRecorder.onstop = function () {
+        var blob = new Blob(recordingChunks, { type: 'audio/webm' });
+        recordingChunks = [];
+        if (blob.size < 1000) {
+          // Too small — ignore
+          setState('listening');
+          return;
+        }
+        sendToTranscribe(blob);
+      };
+    }
+
+    function sendToTranscribe(blob) {
+      setState('transcribing');
+      var form = new FormData();
+      form.append('audio', blob, 'audio.webm');
+      fetch('api/transcribe', { method: 'POST', body: form })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          var text = data && data.text ? data.text.trim() : '';
+          if (!text) {
+            setState('listening');
+            return;
+          }
+          handleVoiceTranscript(text);
+        })
+        .catch(function (e) {
+          console.warn('[jarvis] transcribe error:', e);
+          setState('listening');
+        });
+    }
+
+    function handleVoiceTranscript(text) {
+      if (!conversationMode) {
+        // Fallback: direct submit
+        submitMessage(text);
+        return;
+      }
+      routeVoiceTranscript(conversationMode, text, {
+        submit: function (clean) {
+          submitMessage(clean);
+        },
+        localReply: function (reply, action) {
+          if (action === 'ready') {
+            appendAiBubble().textContent = reply;
+            enqueueTts(reply);
+          } else if (action === 'end') {
+            appendAiBubble().textContent = reply;
+            enqueueTts(reply);
+            setState('standby');
+          }
+        }
+      });
+    }
+
+    // ─── Mic setup ────────────────────────────────────────────────────────────
+    function initMic() {
+      navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        },
+        video: false
+      })
+        .then(function (stream) {
+          micStream = stream;
+          window._micStream = stream;
+          setupVad(stream);
+        })
+        .catch(function (e) {
+          console.warn('[jarvis] mic permission denied:', e.message);
+          var lbl = document.getElementById('sensorLabel');
+          if (lbl) lbl.textContent = 'MIC UNAVAILABLE - ใช้ช่องพิมพ์';
+        });
+    }
+
+    // ─── Audio unlock ────────────────────────────────────────────────────────
+    function unlockAudio() {
+      if (audioUnlocked) return;
+      audioUnlocked = true;
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      audioCtx.resume().catch(function () {});
+      // After audio unlock, try mic
+      if (!micStream) initMic();
+    }
+
+    document.addEventListener('click', unlockAudio, { once: true });
+    document.addEventListener('touchstart', unlockAudio, { once: true });
+
+    // ─── Init conversation mode (app.js functions available globally) ─────────
+    function initConversationMode() {
+      if (typeof createConversationMode === 'function') {
+        conversationMode = createConversationMode();
+      }
+    }
+
+    // ─── Boot ─────────────────────────────────────────────────────────────────
+    function boot() {
+      initConversationMode();
+      // Try auto-mic (may fail without user gesture on some browsers)
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        initMic();
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', boot);
+    } else {
+      boot();
+    }
+
+  })();
+  </script>
 </body>
 </html>
