@@ -997,10 +997,32 @@
       if (!audioCtx) {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       }
+      // Unlock jarvisAudio via AudioContext: play a 1-frame silent buffer
+      // through a MediaStreamDestination node so the browser marks the
+      // <audio> element as user-activated — subsequent src changes will
+      // play() without requiring another gesture.
       audioCtx.resume().then(function () {
-        audioUnlocked = true;
-        retryStartupGreeting();
-        if (!micStream) initMic();
+        try {
+          var buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.1, audioCtx.sampleRate);
+          var src = audioCtx.createBufferSource();
+          src.buffer = buf;
+          src.connect(audioCtx.destination);
+          src.start();
+        } catch(e) {}
+        // Also fire a silent play() on the <audio> element itself so iOS
+        // Safari tracks it as user-activated for future src swaps.
+        jarvisAudio.volume = 0;
+        jarvisAudio.src = '';
+        var silentP = jarvisAudio.play();
+        if (silentP) silentP.catch(function(){});
+        setTimeout(function () {
+          jarvisAudio.pause();
+          jarvisAudio.volume = speakerMuted ? 0 : 1;
+          jarvisAudio.src = '';
+          audioUnlocked = true;
+          retryStartupGreeting();
+          if (!micStream) initMic();
+        }, 50);
       }).catch(function () {
         audioUnlocked = false;
         setSpeakerIndicator(false, 'audio locked');
