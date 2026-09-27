@@ -41,7 +41,7 @@
       </div>
       <div class="topbar-right">
         <button id="micStatus" class="device-status off" aria-label="Microphone off" title="กด เปิด/ปิด ไมโครโฟน">MIC OFF</button>
-        <button id="speakerStatus" class="device-status off" aria-label="Speaker off" title="กด เปิด/ปิด ลำโพง">SPEAKER OFF</button>
+        <button id="speakerStatus" class="device-status off" aria-label="Speaker off" title="กด ปิดเสียง">SPEAKER OFF</button>
         <div class="clock" id="clock">--:--:--</div>
         <div class="status-pill" id="connStatus">
           <span class="pulse-dot"></span>
@@ -248,7 +248,9 @@
           setMicIndicator(true);
         }
       } else {
-        // no stream → try to init
+        // no stream → clear stale state then request permission
+        if (micStream) { teardownMic('retry'); micStream = null; }
+        micInitPending = null;
         initMic();
       }
     });
@@ -259,10 +261,10 @@
       jarvisAudio.muted = speakerMuted;
       if (speakerMuted) {
         setSpeakerIndicator(false, 'muted');
-        speakerStatusEl.title = 'กด เปิดเสียง';
+        speakerStatusEl.title = 'กด เปิดเสียง (Unmute)';
       } else {
         setSpeakerIndicator(!jarvisAudio.paused);
-        speakerStatusEl.title = 'กด ปิดเสียง';
+        speakerStatusEl.title = 'กด ปิดเสียง (Mute)';
         // if TTS was playing while muted, resume
         if (!jarvisAudio.paused) jarvisAudio.play().catch(function(){});
       }
@@ -937,6 +939,25 @@
         })
         .finally(function () { micInitPending = null; });
       return micInitPending;
+    }
+
+    // ─── Permission pre-check ─────────────────────────────────────────────────
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: 'microphone' }).then(function (result) {
+        if (result.state === 'denied') {
+          setMicIndicator(false, 'blocked');
+          showMicRecovery('กด 🔒 หน้า URL → Site settings → Microphone → Allow → Reload', false);
+          var lbl = document.getElementById('sensorLabel');
+          if (lbl) lbl.textContent = 'MIC BLOCKED — เปิดสิทธิ์ใน Site Settings';
+        }
+        result.onchange = function () {
+          if (result.state === 'granted') { hideMicRecovery(); initMic(); }
+          if (result.state === 'denied') {
+            teardownMic('blocked'); micStream = null; micInitPending = null;
+            showMicRecovery('กด 🔒 หน้า URL → Site settings → Microphone → Allow → Reload', false);
+          }
+        };
+      }).catch(function () {});
     }
 
     // ─── Audio unlock ────────────────────────────────────────────────────────
