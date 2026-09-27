@@ -120,7 +120,7 @@ test('setSpeakerIndicator respects speakerMuted state', () => {
 
 test('MIC click handler calls initMic when no stream', () => {
   assert.match(html,
-    /micStatusEl[\s\S]{0,600}initMic\s*\(\s*\)/i,
+    /micStatusEl\.addEventListener\([^)]*click[^)]*\)[\s\S]{0,800}initMic\s*\(\s*\)/i,
     'expected micStatusEl click to call initMic() when no stream');
 });
 

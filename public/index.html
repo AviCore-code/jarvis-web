@@ -25,6 +25,26 @@
   </style>
 </head>
 <body>
+  <!-- Startup tap overlay — dismissed on first tap/click -->
+  <div id="startOverlay" style="
+    position:fixed;inset:0;z-index:9999;
+    background:rgba(0,8,20,0.92);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    cursor:pointer;user-select:none;
+  " aria-label="แตะเพื่อเริ่ม Jarvis">
+    <div style="font-family:'Orbitron',sans-serif;color:#00ffe7;font-size:clamp(1.2rem,4vw,2rem);letter-spacing:.15em;text-align:center;margin-bottom:1.5rem;">
+      JARVIS LIVE
+    </div>
+    <div style="font-family:'Rajdhani',sans-serif;color:#7fffd4;font-size:clamp(1rem,3vw,1.4rem);letter-spacing:.1em;animation:pulse-tap 1.4s ease-in-out infinite;text-align:center;">
+      ▶ แตะที่นี่เพื่อเปิดใช้งาน
+    </div>
+    <div style="font-family:'Rajdhani',sans-serif;color:#4a9080;font-size:.85rem;margin-top:1rem;text-align:center;">
+      (เปิดไมโครโฟน + เสียงพร้อมกัน)
+    </div>
+  </div>
+  <style>
+    @keyframes pulse-tap { 0%,100%{opacity:.5;transform:scale(1)} 50%{opacity:1;transform:scale(1.05)} }
+  </style>
   <canvas id="particles"></canvas>
   <div class="scanlines" aria-hidden="true"></div>
   <div class="vignette" aria-hidden="true"></div>
@@ -41,7 +61,7 @@
       </div>
       <div class="topbar-right">
         <button id="micStatus" class="device-status off" aria-label="Microphone off" title="กด เปิด/ปิด ไมโครโฟน">MIC OFF</button>
-        <button id="speakerStatus" class="device-status off" aria-label="Speaker off" title="กด ปิดเสียง">SPEAKER OFF</button>
+        <button id="speakerStatus" class="device-status off" aria-label="Speaker off" title="กด เปิดเสียง">SPEAKER OFF</button>
         <div class="clock" id="clock">--:--:--</div>
         <div class="status-pill" id="connStatus">
           <span class="pulse-dot"></span>
@@ -188,7 +208,7 @@
     var sensorDot = null;
     var vadInterval = null;
     var micInitPending = null;
-    var speakerMuted = false;
+    var speakerMuted = true;
     var currentAudioUrl = null;
     var KNOWN_NAME_KEY = 'jarvis.knownName';
     var startupGreetingStarted = false;
@@ -962,6 +982,13 @@
 
     // ─── Audio unlock ────────────────────────────────────────────────────────
     function unlockAudio() {
+      // Dismiss startup overlay on first gesture
+      var overlay = document.getElementById('startOverlay');
+      if (overlay && overlay.style.display !== 'none') {
+        overlay.style.transition = 'opacity .4s';
+        overlay.style.opacity = '0';
+        setTimeout(function () { overlay.style.display = 'none'; }, 420);
+      }
       if (audioUnlocked) {
         retryStartupGreeting();
         if (!micStream) initMic();
