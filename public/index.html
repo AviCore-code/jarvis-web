@@ -1099,6 +1099,8 @@
     function initConversationMode() {
       if (typeof createConversationMode === 'function') {
         conversationMode = createConversationMode();
+        // Voice-first page: activate immediately — no wake word required
+        conversationMode.activate();
       }
     }
 
