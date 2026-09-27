@@ -80,3 +80,47 @@ test('successful getUserMedia calls hideMicRecovery()', () => {
     /setMicIndicator\s*\(\s*true\s*\)[\s\S]{0,100}hideMicRecovery\s*\(\s*\)/i,
     'expected hideMicRecovery() called after successful stream acquisition');
 });
+
+// ─── MIC / SPEAKER toggle buttons ────────────────────────────────────────────
+test('micStatus is a button element', () => {
+  assert.match(html,
+    /<button[^>]+id=["\']micStatus["\'][^>]*>/i,
+    'expected #micStatus to be a <button>');
+});
+
+test('speakerStatus is a button element', () => {
+  assert.match(html,
+    /<button[^>]+id=["\']speakerStatus["\'][^>]*>/i,
+    'expected #speakerStatus to be a <button>');
+});
+
+test('micStatus button has click listener', () => {
+  assert.match(html,
+    /micStatusEl\s*\.addEventListener\s*\(\s*['"]click['"]/i,
+    'expected micStatusEl click handler');
+});
+
+test('speakerStatus button has click listener', () => {
+  assert.match(html,
+    /speakerStatusEl\s*\.addEventListener\s*\(\s*['"]click['"]/i,
+    'expected speakerStatusEl click handler');
+});
+
+test('speakerMuted variable is declared', () => {
+  assert.match(html,
+    /var\s+speakerMuted\s*=/,
+    'expected speakerMuted var declaration');
+});
+
+test('setSpeakerIndicator respects speakerMuted state', () => {
+  assert.match(html,
+    /speakerMuted[\s\S]{0,200}SPEAKER MUTED/,
+    'expected setSpeakerIndicator to show SPEAKER MUTED when muted');
+});
+
+test('MIC click handler calls initMic when no stream', () => {
+  assert.match(html,
+    /micStatusEl[\s\S]{0,600}initMic\s*\(\s*\)/i,
+    'expected micStatusEl click to call initMic() when no stream');
+});
+

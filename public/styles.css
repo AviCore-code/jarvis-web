@@ -109,6 +109,27 @@ html, body {
 .brand-text h1 span { color: var(--cyan); text-shadow: 0 0 14px var(--cyan-soft); }
 
 .topbar-right { display: flex; align-items: center; gap: 16px; }
+.device-status {
+  padding: 5px 9px;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 999px;
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+.device-status.on { color: #00ff88; border-color: rgba(0,255,136,0.45); }
+.device-status.off { color: #ff6b6b; border-color: rgba(255,107,107,0.35); }
+button.device-status {
+  background: none;
+  cursor: pointer;
+  outline: none;
+  transition: box-shadow 0.15s, transform 0.1s;
+}
+button.device-status:hover { box-shadow: 0 0 8px rgba(255,255,255,0.18); }
+button.device-status:active { transform: scale(0.95); }
+button.device-status.on:hover { box-shadow: 0 0 10px rgba(0,255,136,0.45); }
+button.device-status.off:hover { box-shadow: 0 0 10px rgba(255,107,107,0.35); }
 .clock {
   font-family: var(--font-display); font-size: 15px; letter-spacing: 2px; color: var(--text-mid);
 }

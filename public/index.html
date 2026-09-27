@@ -40,8 +40,8 @@
         </div>
       </div>
       <div class="topbar-right">
-        <div id="micStatus" class="device-status off" role="status" aria-live="polite" aria-label="Microphone off">MIC OFF</div>
-        <div id="speakerStatus" class="device-status off" role="status" aria-live="polite" aria-label="Speaker off">SPEAKER OFF</div>
+        <button id="micStatus" class="device-status off" aria-label="Microphone off" title="กด เปิด/ปิด ไมโครโฟน">MIC OFF</button>
+        <button id="speakerStatus" class="device-status off" aria-label="Speaker off" title="กด เปิด/ปิด ลำโพง">SPEAKER OFF</button>
         <div class="clock" id="clock">--:--:--</div>
         <div class="status-pill" id="connStatus">
           <span class="pulse-dot"></span>
@@ -188,6 +188,7 @@
     var sensorDot = null;
     var vadInterval = null;
     var micInitPending = null;
+    var speakerMuted = false;
     var currentAudioUrl = null;
     var KNOWN_NAME_KEY = 'jarvis.knownName';
     var startupGreetingStarted = false;
@@ -233,6 +234,40 @@
       });
     }
 
+    // ─── MIC button toggle ─────────────────────────────────────────────────────
+    micStatusEl.addEventListener('click', function () {
+      if (micStream) {
+        // stream live → toggle track enabled
+        var tracks = micStream.getAudioTracks();
+        var isEnabled = tracks.length > 0 && tracks[0].enabled;
+        if (isEnabled) {
+          tracks.forEach(function (t) { t.enabled = false; });
+          setMicIndicator(false, 'paused');
+        } else {
+          tracks.forEach(function (t) { t.enabled = true; });
+          setMicIndicator(true);
+        }
+      } else {
+        // no stream → try to init
+        initMic();
+      }
+    });
+
+    // ─── SPEAKER button toggle ─────────────────────────────────────────────────
+    speakerStatusEl.addEventListener('click', function () {
+      speakerMuted = !speakerMuted;
+      jarvisAudio.muted = speakerMuted;
+      if (speakerMuted) {
+        setSpeakerIndicator(false, 'muted');
+        speakerStatusEl.title = 'กด เปิดเสียง';
+      } else {
+        setSpeakerIndicator(!jarvisAudio.paused);
+        speakerStatusEl.title = 'กด ปิดเสียง';
+        // if TTS was playing while muted, resume
+        if (!jarvisAudio.paused) jarvisAudio.play().catch(function(){});
+      }
+    });
+
     function setMicIndicator(on, detail) {
       micStatusEl.textContent = on ? 'MIC ON' : 'MIC OFF';
       micStatusEl.classList.toggle('on', !!on);
@@ -241,10 +276,11 @@
     }
 
     function setSpeakerIndicator(on, detail) {
-      speakerStatusEl.textContent = on ? 'SPEAKER ON' : 'SPEAKER OFF';
-      speakerStatusEl.classList.toggle('on', !!on);
-      speakerStatusEl.classList.toggle('off', !on);
-      speakerStatusEl.setAttribute('aria-label', 'Speaker ' + (on ? 'on' : 'off') + (detail ? ': ' + detail : ''));
+      var effectiveOn = on && !speakerMuted;
+      speakerStatusEl.textContent = speakerMuted ? 'SPEAKER MUTED' : (effectiveOn ? 'SPEAKER ON' : 'SPEAKER OFF');
+      speakerStatusEl.classList.toggle('on', effectiveOn);
+      speakerStatusEl.classList.toggle('off', !effectiveOn);
+      speakerStatusEl.setAttribute('aria-label', speakerMuted ? 'Speaker muted' : ('Speaker ' + (effectiveOn ? 'on' : 'off') + (detail ? ': ' + detail : '')));
     }
 
     function normalizeKnownName(value) {
