@@ -8,7 +8,21 @@
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="voice-sensor.css">
-  <link rel="stylesheet" href="text-toggle.css">
+  <style>
+    .grid.voice-only { grid-template-columns: minmax(0, 1fr); }
+    .grid.voice-only .core-stage { width: 100%; max-width: 900px; margin-inline: auto; }
+    .sr-only {
+      position: absolute !important;
+      width: 1px !important;
+      height: 1px !important;
+      padding: 0 !important;
+      margin: -1px !important;
+      overflow: hidden !important;
+      clip: rect(0, 0, 0, 0) !important;
+      white-space: nowrap !important;
+      border: 0 !important;
+    }
+  </style>
 </head>
 <body>
   <canvas id="particles"></canvas>
@@ -26,7 +40,6 @@
         </div>
       </div>
       <div class="topbar-right">
-        <button id="toggleChatPanel" class="mini-toggle" type="button" title="เปิด/ปิดหน้าต่างข้อความ">TEXT ON</button>
         <div id="micStatus" class="device-status off" role="status" aria-live="polite" aria-label="Microphone off">MIC OFF</div>
         <div id="speakerStatus" class="device-status off" role="status" aria-live="polite" aria-label="Speaker off">SPEAKER OFF</div>
         <div class="clock" id="clock">--:--:--</div>
@@ -38,7 +51,7 @@
     </header>
 
     <!-- Main grid -->
-    <main class="grid">
+    <main class="grid voice-only">
       <!-- Center: Jarvis core -->
       <section class="core-stage">
         <div class="core-telemetry top">
@@ -125,17 +138,7 @@
         </div>
       </section>
 
-      <!-- Right: conversation -->
-      <section class="panel chat-panel">
-        <div class="panel-label"><span>02</span> CONVERSATION</div>
-        <div id="chatLog" class="chat-log"></div>
-        <form id="chatForm" class="chat-input-row">
-          <input id="chatInput" type="text" placeholder="พิมพ์ข้อความ หรือใช้เสียง..." autocomplete="off">
-          <button type="submit" class="send-btn" aria-label="ส่ง">
-            <svg viewBox="0 0 24 24"><path d="M3 20l18-8L3 4v6l12 2-12 2z"/></svg>
-          </button>
-        </form>
-      </section>
+      <div id="chatLog" class="sr-only" aria-live="polite" aria-atomic="false"></div>
     </main>
 
     <footer class="footer-strip">
@@ -194,10 +197,7 @@
     var coreStateEl = document.getElementById('coreState');
     var cyborgFaceEl = document.getElementById('cyborgFace');
     var chatLogEl = document.getElementById('chatLog');
-    var chatFormEl = document.getElementById('chatForm');
-    var chatInputEl = document.getElementById('chatInput');
-    var toggleChatPanelBtn = document.getElementById('toggleChatPanel');
-    var chatPanelEl = document.querySelector('.chat-panel');
+
     var jarvisAudio = document.getElementById('jarvisAudio');
     var micStatusEl = document.getElementById('micStatus');
     var speakerStatusEl = document.getElementById('speakerStatus');
@@ -304,14 +304,6 @@
     checkHealth();
     setInterval(checkHealth, 30000);
 
-    // ─── Chat panel toggle ────────────────────────────────────────────────────
-    toggleChatPanelBtn.addEventListener('click', function () {
-      if (chatPanelEl) {
-        var hidden = chatPanelEl.style.display === 'none';
-        chatPanelEl.style.display = hidden ? '' : 'none';
-        toggleChatPanelBtn.textContent = hidden ? 'TEXT ON' : 'TEXT OFF';
-      }
-    });
 
     // ─── Chat UI helpers ──────────────────────────────────────────────────────
     function appendUserBubble(text) {
@@ -610,14 +602,6 @@
         });
     }
 
-    // ─── Form submit ──────────────────────────────────────────────────────────
-    chatFormEl.addEventListener('submit', function (e) {
-      e.preventDefault();
-      var text = chatInputEl.value.trim();
-      if (!text) return;
-      chatInputEl.value = '';
-      submitMessage(text);
-    });
 
     // ─── Voice / VAD ──────────────────────────────────────────────────────────
     var VAD_THRESHOLD = 0.015;
@@ -866,7 +850,7 @@
           setMicIndicator(false, e.name || 'unavailable');
           console.warn('[jarvis] mic permission denied:', e.message);
           var lbl = document.getElementById('sensorLabel');
-          if (lbl) lbl.textContent = 'MIC UNAVAILABLE - ใช้ช่องพิมพ์';
+          if (lbl) lbl.textContent = 'MIC UNAVAILABLE - แตะหน้าจอเพื่ออนุญาต';
           return null;
         })
         .finally(function () { micInitPending = null; });
