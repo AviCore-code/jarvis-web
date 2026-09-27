@@ -27,6 +27,8 @@
       </div>
       <div class="topbar-right">
         <button id="toggleChatPanel" class="mini-toggle" type="button" title="เปิด/ปิดหน้าต่างข้อความ">TEXT ON</button>
+        <div id="micStatus" class="device-status off" role="status" aria-live="polite" aria-label="Microphone off">MIC OFF</div>
+        <div id="speakerStatus" class="device-status off" role="status" aria-live="polite" aria-label="Speaker off">SPEAKER OFF</div>
         <div class="clock" id="clock">--:--:--</div>
         <div class="status-pill" id="connStatus">
           <span class="pulse-dot"></span>
@@ -174,6 +176,16 @@
     var sensorLabel = null;
     var sensorDot = null;
     var vadInterval = null;
+    var micInitPending = null;
+    var currentAudioUrl = null;
+    var KNOWN_NAME_KEY = 'jarvis.knownName';
+    var startupGreetingStarted = false;
+    var startupGreetingPending = false;
+    var startupGreetingFinished = false;
+    var currentTtsItem = null;
+    var ttsRetryInFlight = false;
+    var ttsGeneration = 0;
+    var vadSource = null;
 
     // ─── DOM refs ──────────────────────────────────────────────────────────────
     var clockEl = document.getElementById('clock');
@@ -187,6 +199,47 @@
     var toggleChatPanelBtn = document.getElementById('toggleChatPanel');
     var chatPanelEl = document.querySelector('.chat-panel');
     var jarvisAudio = document.getElementById('jarvisAudio');
+    var micStatusEl = document.getElementById('micStatus');
+    var speakerStatusEl = document.getElementById('speakerStatus');
+
+    function setMicIndicator(on, detail) {
+      micStatusEl.textContent = on ? 'MIC ON' : 'MIC OFF';
+      micStatusEl.classList.toggle('on', !!on);
+      micStatusEl.classList.toggle('off', !on);
+      micStatusEl.setAttribute('aria-label', 'Microphone ' + (on ? 'on' : 'off') + (detail ? ': ' + detail : ''));
+    }
+
+    function setSpeakerIndicator(on, detail) {
+      speakerStatusEl.textContent = on ? 'SPEAKER ON' : 'SPEAKER OFF';
+      speakerStatusEl.classList.toggle('on', !!on);
+      speakerStatusEl.classList.toggle('off', !on);
+      speakerStatusEl.setAttribute('aria-label', 'Speaker ' + (on ? 'on' : 'off') + (detail ? ': ' + detail : ''));
+    }
+
+    function normalizeKnownName(value) {
+      return String(value || '').replace(/[<>\r\n]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    }
+
+    function getKnownName() {
+      try { return normalizeKnownName(localStorage.getItem(KNOWN_NAME_KEY)); }
+      catch (e) { return ''; }
+    }
+
+    function rememberKnownName(value) {
+      var name = normalizeKnownName(value);
+      if (!name) return;
+      try { localStorage.setItem(KNOWN_NAME_KEY, name); } catch (e) {}
+    }
+
+    function rememberNameFromText(text) {
+      var match = String(text || '').match(/(?:ผมชื่อ|ฉันชื่อ|ดิฉันชื่อ|ชื่อผมคือ|my name is)\s*([^,.!?\n]{1,40})/i);
+      if (match) rememberKnownName(match[1]);
+    }
+
+    function buildStartupGreeting() {
+      var name = getKnownName();
+      return name ? 'สวัสดีครับคุณ' + name + ' วันนี้มีอะไรให้รับใช้ครับ' : 'สวัสดีครับ วันนี้มีอะไรให้รับใช้ครับ';
+    }
 
     // ─── Clock ────────────────────────────────────────────────────────────────
     function updateClock() {
@@ -285,9 +338,11 @@
     }
 
     // ─── TTS queue ────────────────────────────────────────────────────────────
-    function enqueueTts(text) {
+    function enqueueTts(text, kind, prepend) {
       if (!text || !text.trim()) return;
-      ttsQueue.push(text.trim());
+      var item = { text: text.trim(), kind: kind || 'assistant' };
+      if (prepend) ttsQueue.unshift(item);
+      else ttsQueue.push(item);
       if (!ttsPlaying) playNextTts();
     }
 
@@ -298,45 +353,139 @@
         return;
       }
       ttsPlaying = true;
-      var chunk = ttsQueue.shift();
+      currentTtsItem = ttsQueue.shift();
+      var item = currentTtsItem;
+      var generation = ++ttsGeneration;
       setState('speaking');
       fetch('api/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: chunk })
+        body: JSON.stringify({ text: item.text })
       })
         .then(function (r) {
+          if (generation !== ttsGeneration || currentTtsItem !== item) return null;
           if (!r.ok) throw new Error('TTS failed');
           return r.blob();
         })
         .then(function (blob) {
+          if (!blob || generation !== ttsGeneration || currentTtsItem !== item) return;
+          if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
           var url = URL.createObjectURL(blob);
+          currentAudioUrl = url;
           jarvisAudio.src = url;
           return jarvisAudio.play();
         })
         .catch(function (e) {
+          if (generation !== ttsGeneration || currentTtsItem !== item) return;
           console.warn('[jarvis] TTS error:', e);
+          if (e && e.name === 'NotAllowedError') {
+            startupGreetingPending = currentTtsItem && currentTtsItem.kind === 'greeting';
+            ttsPlaying = true;
+            setState(micStream ? 'listening' : 'standby');
+            setSpeakerIndicator(false, 'tap to enable');
+            return;
+          }
+          if (currentTtsItem && currentTtsItem.kind === 'greeting') {
+            startupGreetingPending = false;
+            startupGreetingFinished = true;
+          }
+          currentTtsItem = null;
           ttsPlaying = false;
           playNextTts();
         });
     }
 
     jarvisAudio.addEventListener('ended', function () {
+      setSpeakerIndicator(false);
+      if (currentTtsItem && currentTtsItem.kind === 'greeting') {
+        startupGreetingFinished = true;
+        startupGreetingPending = false;
+      }
+      currentTtsItem = null;
+      releaseCurrentAudioUrl();
       ttsPlaying = false;
       playNextTts();
     });
 
     jarvisAudio.addEventListener('error', function () {
+      setSpeakerIndicator(false, 'playback error');
+      if (currentTtsItem && currentTtsItem.kind === 'greeting') {
+        startupGreetingFinished = true;
+        startupGreetingPending = false;
+      }
+      currentTtsItem = null;
+      ttsRetryInFlight = false;
+      releaseCurrentAudioUrl();
       ttsPlaying = false;
       playNextTts();
     });
 
+    jarvisAudio.addEventListener('playing', function () {
+      setSpeakerIndicator(true);
+      if (currentTtsItem && currentTtsItem.kind === 'greeting') startupGreetingPending = false;
+    });
+
+    jarvisAudio.addEventListener('pause', function () {
+      setSpeakerIndicator(false);
+    });
+
+    function startStartupGreeting() {
+      if (startupGreetingStarted) return;
+      startupGreetingStarted = true;
+      startupGreetingPending = true;
+      enqueueTts(buildStartupGreeting(), 'greeting', true);
+    }
+
+    function retryDeferredTts() {
+      if (!currentTtsItem || !jarvisAudio.src || !jarvisAudio.paused || ttsRetryInFlight) return;
+      ttsRetryInFlight = true;
+      setState('speaking');
+      Promise.resolve(jarvisAudio.play()).then(function () {
+        ttsRetryInFlight = false;
+      }).catch(function (e) {
+        ttsRetryInFlight = false;
+        if (e && e.name === 'NotAllowedError') {
+          setState(micStream ? 'listening' : 'standby');
+          setSpeakerIndicator(false, 'tap to enable');
+          return;
+        }
+        if (currentTtsItem && currentTtsItem.kind === 'greeting') {
+          startupGreetingPending = false;
+          startupGreetingFinished = true;
+        }
+        currentTtsItem = null;
+        releaseCurrentAudioUrl();
+        ttsPlaying = false;
+        console.warn('[jarvis] deferred TTS error:', e);
+        playNextTts();
+      });
+    }
+
+    function retryStartupGreeting() {
+      retryDeferredTts();
+    }
+
+    function releaseCurrentAudioUrl() {
+      if (!currentAudioUrl) return;
+      URL.revokeObjectURL(currentAudioUrl);
+      currentAudioUrl = null;
+    }
+
     // ─── Interrupt / barge-in ─────────────────────────────────────────────────
     function interruptSpeaking() {
       if (currentState === 'speaking') {
+        ttsGeneration++;
+        if (currentTtsItem && currentTtsItem.kind === 'greeting') {
+          startupGreetingPending = false;
+          startupGreetingFinished = true;
+        }
         jarvisAudio.pause();
+        setSpeakerIndicator(false);
         jarvisAudio.src = '';
+        releaseCurrentAudioUrl();
         ttsQueue = [];
+        currentTtsItem = null;
+        ttsRetryInFlight = false;
         ttsPlaying = false;
         setState('listening');
       }
@@ -372,6 +521,7 @@
     function submitMessage(text) {
       if (!text || !text.trim()) return;
       text = text.trim();
+      rememberNameFromText(text);
 
       // Add to history
       messages.push({ role: 'user', content: text });
@@ -479,11 +629,14 @@
         if (!audioCtx) {
           audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         }
-        var source = audioCtx.createMediaStreamSource(stream);
+        if (vadSource) {
+          try { vadSource.disconnect(); } catch (e) {}
+        }
+        vadSource = audioCtx.createMediaStreamSource(stream);
         analyser = audioCtx.createAnalyser();
         analyser.fftSize = 512;
         analyser.smoothingTimeConstant = 0.4;
-        source.connect(analyser);
+        vadSource.connect(analyser);
 
         eqBarsEl = document.getElementById('eqBars');
         sensorLabel = document.getElementById('sensorLabel');
@@ -578,6 +731,24 @@
       }
     }
 
+    function teardownMic(reason) {
+      if (vadInterval) { clearInterval(vadInterval); vadInterval = null; }
+      if (vadRisingTimer) { clearTimeout(vadRisingTimer); vadRisingTimer = null; }
+      if (vadFallingTimer) { clearTimeout(vadFallingTimer); vadFallingTimer = null; }
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        try { mediaRecorder.stop(); } catch (e) {}
+      }
+      mediaRecorder = null;
+      isRecording = false;
+      vadActive = false;
+      if (vadSource) { try { vadSource.disconnect(); } catch (e) {} vadSource = null; }
+      analyser = null;
+      micStream = null;
+      window._micStream = null;
+      setMicIndicator(false, reason || 'unavailable');
+      if (currentState === 'listening' || currentState === 'recording') setState('standby');
+    }
+
     function startRecording(stream) {
       if (isRecording) return;
       recordingChunks = [];
@@ -660,7 +831,16 @@
 
     // ─── Mic setup ────────────────────────────────────────────────────────────
     function initMic() {
-      navigator.mediaDevices.getUserMedia({
+      if (micInitPending) return micInitPending;
+      if (micStream && micStream.getAudioTracks().some(function (track) { return track.readyState === 'live' && track.enabled; })) {
+        setMicIndicator(true);
+        return Promise.resolve(micStream);
+      }
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setMicIndicator(false, 'unsupported');
+        return Promise.resolve(null);
+      }
+      micInitPending = navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -671,29 +851,55 @@
         .then(function (stream) {
           micStream = stream;
           window._micStream = stream;
+          setMicIndicator(true);
+          stream.getAudioTracks().forEach(function (track) {
+            track.addEventListener('ended', function () {
+              teardownMic('track ended');
+            });
+            track.addEventListener('mute', function () { setMicIndicator(false, 'muted'); });
+            track.addEventListener('unmute', function () { setMicIndicator(true); });
+          });
           setupVad(stream);
+          return stream;
         })
         .catch(function (e) {
+          setMicIndicator(false, e.name || 'unavailable');
           console.warn('[jarvis] mic permission denied:', e.message);
           var lbl = document.getElementById('sensorLabel');
           if (lbl) lbl.textContent = 'MIC UNAVAILABLE - ใช้ช่องพิมพ์';
-        });
+          return null;
+        })
+        .finally(function () { micInitPending = null; });
+      return micInitPending;
     }
 
     // ─── Audio unlock ────────────────────────────────────────────────────────
     function unlockAudio() {
-      if (audioUnlocked) return;
-      audioUnlocked = true;
+      if (audioUnlocked) {
+        retryStartupGreeting();
+        if (!micStream) initMic();
+        return;
+      }
       if (!audioCtx) {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       }
-      audioCtx.resume().catch(function () {});
-      // After audio unlock, try mic
-      if (!micStream) initMic();
+      audioCtx.resume().then(function () {
+        audioUnlocked = true;
+        retryStartupGreeting();
+        if (!micStream) initMic();
+      }).catch(function () {
+        audioUnlocked = false;
+        setSpeakerIndicator(false, 'audio locked');
+      });
     }
 
-    document.addEventListener('click', unlockAudio, { once: true });
-    document.addEventListener('touchstart', unlockAudio, { once: true });
+    document.addEventListener('click', unlockAudio);
+    document.addEventListener('touchstart', unlockAudio);
+    window.addEventListener('pagehide', function () {
+      releaseCurrentAudioUrl();
+      if (micStream) micStream.getTracks().forEach(function (track) { track.stop(); });
+      teardownMic('page hidden');
+    });
 
     // ─── Init conversation mode (app.js functions available globally) ─────────
     function initConversationMode() {
@@ -705,10 +911,9 @@
     // ─── Boot ─────────────────────────────────────────────────────────────────
     function boot() {
       initConversationMode();
-      // Try auto-mic (may fail without user gesture on some browsers)
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        initMic();
-      }
+      setMicIndicator(false);
+      setSpeakerIndicator(false);
+      startStartupGreeting();
     }
 
     if (document.readyState === 'loading') {
