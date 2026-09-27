@@ -61,7 +61,7 @@
       </div>
       <div class="topbar-right">
         <button id="micStatus" class="device-status off" aria-label="Microphone off" title="กด เปิด/ปิด ไมโครโฟน">MIC OFF</button>
-        <button id="speakerStatus" class="device-status off" aria-label="Speaker muted" title="กด เปิดเสียง">SPEAKER MUTED</button>
+        <button id="speakerStatus" class="device-status off" aria-label="Speaker on" title="กด ปิดเสียง">SPEAKER ON</button>
         <div class="clock" id="clock">--:--:--</div>
         <div class="status-pill" id="connStatus">
           <span class="pulse-dot"></span>
@@ -208,7 +208,7 @@
     var sensorDot = null;
     var vadInterval = null;
     var micInitPending = null;
-    var speakerMuted = true;
+    var speakerMuted = false;
     var currentAudioUrl = null;
     var KNOWN_NAME_KEY = 'jarvis.knownName';
     var startupGreetingStarted = false;
@@ -1026,8 +1026,8 @@
     function boot() {
       initConversationMode();
       setMicIndicator(false);
-      jarvisAudio.muted = true;
-      setSpeakerIndicator(false);
+      jarvisAudio.muted = false;
+      setSpeakerIndicator(true);
       startStartupGreeting();
     }
 
