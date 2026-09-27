@@ -132,6 +132,14 @@
             <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
             <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
           </div>
+          <div id="micRecovery" style="display:none;margin-top:8px;text-align:center;">
+            <button id="enableMicBtn" type="button"
+              aria-label="เปิดไมโครโฟน — แตะเพื่อลองใหม่"
+              style="background:rgba(0,200,120,0.15);border:1px solid rgba(0,200,120,0.5);color:#00c878;padding:6px 18px;border-radius:4px;font-size:0.8rem;letter-spacing:0.05em;cursor:pointer;">
+              แตะเพื่อลองใหม่
+            </button>
+            <p id="micRecoveryHint" style="margin:4px 0 0;font-size:0.72rem;color:#aaa;letter-spacing:0.04em;"></p>
+          </div>
         </div>
         <div class="core-telemetry bottom">
           <span>MODEL</span><strong id="modelName">hermes-agent</strong>
@@ -189,6 +197,9 @@
     var ttsRetryInFlight = false;
     var ttsGeneration = 0;
     var vadSource = null;
+    var enableMicBtn = null;
+    var micRecoveryEl = null;
+    var micRecoveryHint = null;
 
     // ─── DOM refs ──────────────────────────────────────────────────────────────
     var clockEl = document.getElementById('clock');
@@ -201,6 +212,26 @@
     var jarvisAudio = document.getElementById('jarvisAudio');
     var micStatusEl = document.getElementById('micStatus');
     var speakerStatusEl = document.getElementById('speakerStatus');
+    enableMicBtn = document.getElementById('enableMicBtn');
+    micRecoveryEl = document.getElementById('micRecovery');
+    micRecoveryHint = document.getElementById('micRecoveryHint');
+
+    // ─── Mic recovery helpers ─────────────────────────────────────────────────
+    function showMicRecovery(hint, canRetry) {
+      if (!micRecoveryEl) return;
+      micRecoveryEl.style.display = 'block';
+      if (micRecoveryHint) micRecoveryHint.textContent = hint || '';
+      if (enableMicBtn) enableMicBtn.style.display = canRetry ? 'inline-block' : 'none';
+    }
+    function hideMicRecovery() {
+      if (micRecoveryEl) micRecoveryEl.style.display = 'none';
+    }
+    if (enableMicBtn) {
+      enableMicBtn.addEventListener('click', function () {
+        hideMicRecovery();
+        initMic();
+      });
+    }
 
     function setMicIndicator(on, detail) {
       micStatusEl.textContent = on ? 'MIC ON' : 'MIC OFF';
@@ -836,6 +867,7 @@
           micStream = stream;
           window._micStream = stream;
           setMicIndicator(true);
+          hideMicRecovery();
           stream.getAudioTracks().forEach(function (track) {
             track.addEventListener('ended', function () {
               teardownMic('track ended');
@@ -847,10 +879,24 @@
           return stream;
         })
         .catch(function (e) {
-          setMicIndicator(false, e.name || 'unavailable');
-          console.warn('[jarvis] mic permission denied:', e.message);
+          var eName = (e && e.name) || 'unavailable';
+          setMicIndicator(false, eName);
+          console.warn('[jarvis] mic error:', eName, e && e.message);
           var lbl = document.getElementById('sensorLabel');
-          if (lbl) lbl.textContent = 'MIC UNAVAILABLE - แตะหน้าจอเพื่ออนุญาต';
+          if (eName === 'NotAllowedError' || eName === 'PermissionDeniedError') {
+            // browser has blocked permission — user must open site settings
+            if (lbl) lbl.textContent = 'MIC UNAVAILABLE — กรุณาอนุญาตไมโครโฟนในการตั้งค่าเบราว์เซอร์';
+            showMicRecovery('เปิด Settings → Site / App permissions → Microphone → Allow แล้วกลับมา', false);
+          } else if (eName === 'NotFoundError' || eName === 'DevicesNotFoundError') {
+            if (lbl) lbl.textContent = 'ไม่พบไมโครโฟน — กรุณาเสียบอุปกรณ์แล้วลองใหม่';
+            showMicRecovery('ไม่พบอุปกรณ์ไมโครโฟน — เสียบแล้วแตะเพื่อลองใหม่', true);
+          } else if (eName === 'NotReadableError' || eName === 'TrackStartError') {
+            if (lbl) lbl.textContent = 'ไมโครโฟนถูกใช้งานโดยแอปอื่น — ปิดแอปอื่นแล้วลองใหม่';
+            showMicRecovery('อุปกรณ์ไมโครโฟนถูกใช้งานอยู่ — แตะเพื่อลองใหม่', true);
+          } else {
+            if (lbl) lbl.textContent = 'MIC UNAVAILABLE — แตะหน้าจอเพื่ออนุญาต';
+            showMicRecovery('', true);
+          }
           return null;
         })
         .finally(function () { micInitPending = null; });
