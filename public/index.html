@@ -218,6 +218,9 @@
     var currentTtsItem = null;
     var ttsRetryInFlight = false;
     var ttsGeneration = 0;
+    var chatGeneration = 0;
+    var chatAbortController = null;
+    var ttsAbortController = null;
     var vadSource = null;
     var enableMicBtn = null;
     var micRecoveryEl = null;
@@ -431,18 +434,22 @@
     function playNextTts() {
       if (ttsQueue.length === 0) {
         ttsPlaying = false;
-        if (currentState === 'speaking') setState('standby');
+        if (currentState === 'speaking' || currentState === 'thinking') {
+          setState(micStream ? 'listening' : 'standby');
+        }
         return;
       }
       ttsPlaying = true;
       currentTtsItem = ttsQueue.shift();
       var item = currentTtsItem;
       var generation = ++ttsGeneration;
+      ttsAbortController = new AbortController();
       setState('speaking');
       fetch('api/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: item.text })
+        body: JSON.stringify({ text: item.text }),
+        signal: ttsAbortController.signal
       })
         .then(function (r) {
           if (generation !== ttsGeneration || currentTtsItem !== item) return null;
@@ -575,6 +582,11 @@
     function interruptSpeaking() {
       if (currentState === 'speaking') {
         ttsGeneration++;
+        chatGeneration++;
+        if (chatAbortController) chatAbortController.abort();
+        chatAbortController = null;
+        if (ttsAbortController) ttsAbortController.abort();
+        ttsAbortController = null;
         if (currentTtsItem && currentTtsItem.kind === 'greeting') {
           startupGreetingPending = false;
           startupGreetingFinished = true;
@@ -599,8 +611,7 @@
         // Send whatever remains
         var remaining = fullText.trim();
         if (remaining) enqueueTts(remaining);
-        streamingBuffer = '';
-        return;
+        return '';
       }
       // Try to find complete sentences in new text
       var parts = fullText.split(sentencePattern);
@@ -611,9 +622,9 @@
           if (sent) enqueueTts(sent);
         }
         // Keep the incomplete last part
-        streamingBuffer = parts[parts.length - 1] || '';
+        return parts[parts.length - 1] || '';
       } else {
-        streamingBuffer = fullText;
+        return fullText;
       }
     }
 
@@ -628,36 +639,49 @@
       if (messages.length > 20) messages = messages.slice(messages.length - 20);
 
       appendUserBubble(text);
-      currentAiBubble = appendAiBubble();
-      currentAiText = '';
-      streamingBuffer = '';
+      chatGeneration++;
+      var generation = chatGeneration;
+      if (chatAbortController) chatAbortController.abort();
+      chatAbortController = new AbortController();
+      var requestController = chatAbortController;
+      var aiBubble = appendAiBubble();
+      var aiText = '';
+      var turnBuffer = '';
       setState('thinking');
 
       fetch('api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: messages.slice() })
+        body: JSON.stringify({ messages: messages.slice() }),
+        signal: requestController.signal
       })
         .then(function (r) {
+          if (generation !== chatGeneration) return null;
           if (!r.ok) throw new Error('Chat API error ' + r.status);
           return r.body.getReader();
         })
         .then(function (reader) {
+          if (!reader || generation !== chatGeneration) return;
           var decoder = new TextDecoder();
           var buf = '';
 
           function pump() {
             return reader.read().then(function (result) {
+              if (generation !== chatGeneration) {
+                reader.cancel();
+                return;
+              }
               if (result.done) {
                 // Stream finished
-                updateAiBubble(currentAiBubble, currentAiText, false);
-                flushSentences(streamingBuffer, true);
+                updateAiBubble(aiBubble, aiText, false);
+                flushSentences(turnBuffer, true);
                 // Add AI response to history
-                if (currentAiText) {
-                  messages.push({ role: 'assistant', content: currentAiText });
+                if (aiText) {
+                  messages.push({ role: 'assistant', content: aiText });
                   if (messages.length > 20) messages = messages.slice(messages.length - 20);
                 }
-                if (currentState === 'thinking') setState('standby');
+                chatAbortController = null;
+                if (currentState === 'thinking') setState(micStream ? 'listening' : 'standby');
                 return;
               }
 
@@ -670,13 +694,15 @@
                 if (!line || !line.startsWith('data:')) continue;
                 var jsonStr = line.slice(5).trim();
                 if (jsonStr === '[DONE]') {
-                  updateAiBubble(currentAiBubble, currentAiText, false);
-                  flushSentences(streamingBuffer, true);
-                  if (currentAiText) {
-                    messages.push({ role: 'assistant', content: currentAiText });
+                  if (generation !== chatGeneration) return;
+                  updateAiBubble(aiBubble, aiText, false);
+                  flushSentences(turnBuffer, true);
+                  if (aiText) {
+                    messages.push({ role: 'assistant', content: aiText });
                     if (messages.length > 20) messages = messages.slice(messages.length - 20);
                   }
-                  if (currentState === 'thinking') setState('standby');
+                  chatAbortController = null;
+                  if (currentState === 'thinking') setState(micStream ? 'listening' : 'standby');
                   return;
                 }
                 try {
@@ -686,11 +712,12 @@
                               obj.choices[0].delta &&
                               obj.choices[0].delta.content;
                   if (delta) {
-                    currentAiText += delta;
-                    streamingBuffer += delta;
-                    updateAiBubble(currentAiBubble, currentAiText, true);
+                    if (generation !== chatGeneration) return;
+                    aiText += delta;
+                    turnBuffer += delta;
+                    updateAiBubble(aiBubble, aiText, true);
                     // Try to flush complete sentences
-                    flushSentences(streamingBuffer, false);
+                    turnBuffer = flushSentences(turnBuffer, false);
                   }
                 } catch (e) {
                   // ignore parse errors on partial chunks
@@ -702,11 +729,14 @@
           return pump();
         })
         .catch(function (e) {
+          if (e && e.name === 'AbortError') return;
+          if (generation !== chatGeneration) return;
           console.error('[jarvis] chat error:', e);
-          if (currentAiBubble) {
-            currentAiBubble.textContent = '[เกิดข้อผิดพลาด: ' + e.message + ']';
+          if (aiBubble) {
+            aiBubble.textContent = '[เกิดข้อผิดพลาด: ' + e.message + ']';
           }
-          setState('standby');
+          chatAbortController = null;
+          setState(micStream ? 'listening' : 'standby');
         });
     }
 
@@ -771,9 +801,11 @@
                         currentState === 'transcribing';
 
           if (blocked) {
-            // If speaking and user talks loud → barge-in
+            // If speaking and user talks loud → stop the old turn and capture this utterance.
             if (currentState === 'speaking' && rms > VAD_THRESHOLD * 2) {
               interruptSpeaking();
+              vadActive = true;
+              startRecording(stream);
             }
             return;
           }
