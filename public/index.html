@@ -61,7 +61,7 @@
       </div>
       <div class="topbar-right">
         <button id="micStatus" class="device-status off" aria-label="Microphone off" title="กด เปิด/ปิด ไมโครโฟน">MIC OFF</button>
-        <button id="speakerStatus" class="device-status off" aria-label="Speaker off" title="กด เปิดเสียง">SPEAKER OFF</button>
+        <button id="speakerStatus" class="device-status off" aria-label="Speaker muted" title="กด เปิดเสียง">SPEAKER MUTED</button>
         <div class="clock" id="clock">--:--:--</div>
         <div class="status-pill" id="connStatus">
           <span class="pulse-dot"></span>
@@ -1026,6 +1026,7 @@
     function boot() {
       initConversationMode();
       setMicIndicator(false);
+      jarvisAudio.muted = true;
       setSpeakerIndicator(false);
       startStartupGreeting();
     }
