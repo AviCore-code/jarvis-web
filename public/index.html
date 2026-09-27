@@ -214,6 +214,7 @@
     var startupGreetingStarted = false;
     var startupGreetingPending = false;
     var startupGreetingFinished = false;
+    var pendingGreetingBlob = null;  // pre-fetched before tap
     var currentTtsItem = null;
     var ttsRetryInFlight = false;
     var ttsGeneration = 0;
@@ -512,9 +513,27 @@
 
     function startStartupGreeting() {
       if (startupGreetingStarted) return;
+      if (!pendingGreetingBlob) preFetchGreeting(); // ensure blob is being fetched
       startupGreetingStarted = true;
       startupGreetingPending = true;
       enqueueTts(buildStartupGreeting(), 'greeting', true);
+    }
+
+    // Pre-fetch the startup greeting audio so it's ready before the user taps.
+    // On tap we set the blob URL and call play() synchronously within the gesture.
+    function preFetchGreeting() {
+      if (pendingGreetingBlob) return;
+      fetch('api/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: buildStartupGreeting() })
+      }).then(function(r) {
+        if (!r.ok) return;
+        return r.blob();
+      }).then(function(blob) {
+        if (!blob || audioUnlocked) return; // already played
+        pendingGreetingBlob = URL.createObjectURL(blob);
+      }).catch(function() {});
     }
 
     function retryDeferredTts() {
@@ -997,36 +1016,43 @@
       if (!audioCtx) {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       }
-      // Unlock jarvisAudio via AudioContext: play a 1-frame silent buffer
-      // through a MediaStreamDestination node so the browser marks the
-      // <audio> element as user-activated — subsequent src changes will
-      // play() without requiring another gesture.
-      audioCtx.resume().then(function () {
-        try {
-          var buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.1, audioCtx.sampleRate);
-          var src = audioCtx.createBufferSource();
-          src.buffer = buf;
-          src.connect(audioCtx.destination);
-          src.start();
-        } catch(e) {}
-        // Also fire a silent play() on the <audio> element itself so iOS
-        // Safari tracks it as user-activated for future src swaps.
-        jarvisAudio.volume = 0;
-        jarvisAudio.src = '';
-        var silentP = jarvisAudio.play();
-        if (silentP) silentP.catch(function(){});
-        setTimeout(function () {
-          jarvisAudio.pause();
-          jarvisAudio.volume = speakerMuted ? 0 : 1;
-          jarvisAudio.src = '';
-          audioUnlocked = true;
+      // INSTANT PLAY: if we have a pre-fetched greeting blob, set it as src
+      // and call play() RIGHT NOW while still in the synchronous gesture handler.
+      // This is the most reliable way to pass browser autoplay policy.
+      audioUnlocked = true;
+      if (!micStream) initMic();
+      if (pendingGreetingBlob && !startupGreetingFinished) {
+        jarvisAudio.volume = speakerMuted ? 0 : 1;
+        jarvisAudio.muted = speakerMuted;
+        if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
+        currentAudioUrl = pendingGreetingBlob;
+        pendingGreetingBlob = null;
+        jarvisAudio.src = currentAudioUrl;
+        // This play() is called synchronously inside the gesture handler
+        var playP = jarvisAudio.play();
+        if (playP) playP.then(function() {
+          startupGreetingPending = false;
+          startupGreetingFinished = true;
+          currentTtsItem = { text: buildStartupGreeting(), kind: 'greeting' };
+          setSpeakerIndicator(true);
+          setState('speaking');
+        }).catch(function(e) {
+          console.warn('[jarvis] instant greeting play failed:', e);
+          // Fallback: AudioContext unlock then retry
+          if (audioCtx) audioCtx.resume().then(function() { retryStartupGreeting(); }).catch(function(){});
+        });
+        // Mark audio context as resumed too
+        if (audioCtx) audioCtx.resume().catch(function(){});
+      } else {
+        // Blob not ready yet (slow network) — unlock AudioContext and retry
+        if (audioCtx) {
+          audioCtx.resume().then(function() {
+            retryStartupGreeting();
+          }).catch(function(){});
+        } else {
           retryStartupGreeting();
-          if (!micStream) initMic();
-        }, 50);
-      }).catch(function () {
-        audioUnlocked = false;
-        setSpeakerIndicator(false, 'audio locked');
-      });
+        }
+      }
     }
 
     document.addEventListener('click', unlockAudio);
