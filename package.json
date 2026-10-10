@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test ops/reverse-proxy/proxy.test.js && python3 -m unittest discover -s ops/location-tracker -p 'test_*.py' && python3 ops/tailscale/test_watchdog.py && python3 ops/mission-control/test_watchdog.py"
+    "test": "node --test tests/*.test.js && node --test ops/continuous-conversation/*.test.js && node --test ops/reverse-proxy/proxy.test.js && python3 -m unittest discover -s ops/location-tracker -p 'test_*.py' && python3 ops/tailscale/test_watchdog.py && python3 ops/mission-control/test_watchdog.py"
   },
   "dependencies": {
     "express": "^4.19.2",
