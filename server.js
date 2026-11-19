@@ -32,6 +32,8 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 const PORT = process.env.JARVIS_WEB_PORT || 3001;
 const HERMES_API_BASE = process.env.HERMES_API_BASE || 'http://127.0.0.1:8642/v1';
 const HERMES_API_KEY = process.env.HERMES_API_KEY || '';
+const JARVIS_CORE_CHAT_URL = 'http://127.0.0.1:3020/chat';
+const JARVIS_CORE_API_KEY = process.env.JARVIS_CORE_API_KEY || '';
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const EDGE_TTS_VOICE = process.env.EDGE_TTS_VOICE || 'th-TH-NiwatNeural';
 
@@ -58,6 +60,42 @@ app.post('/api/chat', async (req, res) => {
   const { messages } = req.body;
   if (!Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: 'messages[] is required' });
+  }
+
+  const latest = messages[messages.length - 1];
+  const text = latest?.role === 'user' && typeof latest.content === 'string' ? latest.content.trim() : '';
+  if (/^\/manual-demo(?:\s|$)/u.test(text)) {
+    const sendManualReply = reply => {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: reply } }] })}\n\ndata: [DONE]\n\n`);
+    };
+    if (process.env.JARVIS_WEB_MANUAL_DEMO_ENABLED !== 'true') {
+      return sendManualReply('คำสั่งค้นคู่มือสมมติยังไม่ได้เปิดใช้งาน');
+    }
+    if (text.length > 213) {
+      return sendManualReply('กรุณาใช้คำค้นไม่เกิน 200 ตัวอักษร');
+    }
+    try {
+      const response = await fetch(JARVIS_CORE_CHAT_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(JARVIS_CORE_API_KEY ? { Authorization: `Bearer ${JARVIS_CORE_API_KEY}` } : {}),
+        },
+        body: JSON.stringify({ text, allowCloud: false }),
+        redirect: 'error',
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) return sendManualReply('ตอนนี้ค้นคู่มือสมมติไม่ได้ กรุณาตรวจการตั้งค่า JARVIS Core');
+      const result = await response.json();
+      if (result.skill !== 'manual-demo' || typeof result.reply !== 'string') {
+        return sendManualReply('JARVIS Core ยังไม่รองรับคำสั่งค้นคู่มือสมมติ');
+      }
+      return sendManualReply(result.reply);
+    } catch {
+      return sendManualReply('ติดต่อ JARVIS Core ไม่ได้ กรุณาลองอีกครั้ง');
+    }
   }
 
   try {
