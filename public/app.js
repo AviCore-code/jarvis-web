@@ -601,7 +601,9 @@
 
   async function submitChat(text) {
     addMessage('user', text);
-    conversation.push({ role: 'user', content: text });
+    const manualDemo = /^\/manual-demo(?:\s|$)/u.test(text.trim());
+    const userMessage = { role: 'user', content: text };
+    if (!manualDemo) conversation.push(userMessage);
     setCoreState('THINKING');
 
     const assistantDiv = addMessage('assistant', '');
@@ -612,7 +614,7 @@
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: conversation }),
+        body: JSON.stringify({ messages: manualDemo ? [userMessage] : conversation }),
       });
 
       if (!res.ok || !res.body) {
@@ -651,7 +653,7 @@
       }
 
       latencyEl.textContent = `LATENCY ${Math.round(performance.now() - t0)}ms`;
-      conversation.push({ role: 'assistant', content: fullText });
+      if (!manualDemo) conversation.push({ role: 'assistant', content: fullText });
       if (fullText) speak(fullText);
     } catch (err) {
       assistantDiv.textContent = 'เชื่อมต่อไม่สำเร็จ: ' + err.message;
